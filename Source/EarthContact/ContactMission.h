@@ -17,7 +17,7 @@ class AContactState : public AGameStateBase
 public:
     UPROPERTY(Replicated) int32 ScannedMask = 0;
     UPROPERTY(Replicated) EContactResult Result = EContactResult::Active;
-    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
+    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
 UCLASS()
@@ -27,10 +27,10 @@ class AContactMember : public APlayerState
 public:
     // All responders belong to the same team and role in this mission.
     UPROPERTY(EditDefaultsOnly) FName Team = TEXT("Field Unit");
-    UPROPERTY(EditDefaultsOnly) FName Role = TEXT("Surveyor");
+    UPROPERTY(EditDefaultsOnly) FName SurveyRole = TEXT("Surveyor");
     UPROPERTY(Replicated) int32 Evidence = 0;
     UPROPERTY(Replicated) int32 Health = 100;
-    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const override;
+    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
 UCLASS()

@@ -42,16 +42,16 @@ namespace
     }
 }
 
-void AContactState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const
+void AContactState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-    Super::GetLifetimeReplicatedProps(Out);
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AContactState, ScannedMask);
     DOREPLIFETIME(AContactState, Result);
 }
 
-void AContactMember::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out) const
+void AContactMember::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-    Super::GetLifetimeReplicatedProps(Out);
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AContactMember, Evidence);
     DOREPLIFETIME(AContactMember, Health);
 }

@@ -4,9 +4,9 @@ Unreal Engine 5.8 C++ source baseline for a third-person Windows co-op mission. 
 
 ## Current build status
 
-Initial checkout contained only Git metadata. Preflight found Visual Studio 2022 Build Tools with the x64/x86 C++ component and Windows SDK 10.0.26100.0. No Unreal installation was identified via PATH, the checked Epic install locations, launcher manifest or registry. The local engine version and available engine plugins could not be inspected. The project targets 5.8 and Win64 and declares no plugin dependencies.
+EarthContactEditor compiled and linked successfully on Windows with Unreal Engine 5.8.4, MSVC 14.44.35229 and Windows SDK 10.0.26100.0. The project declares no plugin dependencies. Double-click `Play Earth Contact.cmd` to rebuild and launch the mission using the local Epic installation.
 
-Editor compilation, cooking, standalone play, two-client play, screenshots, network logs and dedicated-server packaging are pending. No Windows executable has been produced.
+The first standalone launch reached a prerequisite dialog requiring Visual C++ x64 runtime 14.50.35719.0 or newer. The included installer is under Engine/Extras/Redist/en-us/vc_redist.x64.exe. Mission play, two-client acceptance and packaged builds require further verification.
 
 ## Windows setup and launch
 

@@ -1,0 +1,7 @@
+[2026.11.08-23.43.06:516][  0]LogTemp: Display: BATTLE deployed hp=100 ammo=30 position=V(X=-2200.00, Y=-520.00, Z=100.00)
+[2026.11.08-23.43.34:268][843]LogTemp: Display: BATTLE end result=2 allies=7 raiders=8 uplink=0.0
+[2026.11.08-23.43.44:158][766]LogTemp: Display: BATTLE deployed hp=100 ammo=30 position=V(X=-2200.00, Y=-520.00, Z=100.00)
+[2026.11.08-23.43.51:138][581]LogTemp: Display: BATTLE hit unit[-1] -> alien[0] hp=0
+[2026.11.08-23.43.55:445][347]LogTemp: Display: BATTLE player reloaded ammo=30
+[2026.11.08-23.43.55:603][415]LogTemp: Display: BATTLE hit unit[-1] -> alien[7] hp=0
+[2026.11.08-23.44.01:585][821]LogTemp: Display: BATTLE end result=2 allies=12 raiders=10 uplink=0.0

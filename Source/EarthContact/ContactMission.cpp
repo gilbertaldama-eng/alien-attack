@@ -1,265 +1,360 @@
 #include "ContactMission.h"
 #include "Camera/CameraComponent.h"
+#include "Animation/AnimSequence.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/SceneComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/World.h"
 #include "Engine/Canvas.h"
-#include "Components/DirectionalLightComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
-#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "Sound/SoundBase.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Camera/PlayerCameraManager.h"
+#include "DrawDebugHelpers.h"
+#include "ProceduralMeshComponent.h"
 
 namespace
 {
-    const FVector Stations[] = {{1700,-650,90}, {2850,850,90}, {850,1850,90}};
-    const FVector Landing(0,0,90);
-    const TCHAR* Labels[] = {TEXT("Telemetry mast"), TEXT("Crash debris"), TEXT("Weather station")};
-    const TCHAR* Cube = TEXT("/Engine/BasicShapes/Cube.Cube");
-    const TCHAR* Sphere = TEXT("/Engine/BasicShapes/Sphere.Sphere");
-    const TCHAR* Cone = TEXT("/Engine/BasicShapes/Cone.Cone");
-
-    // Called only during actor construction. Engine primitives are 100 cm across.
-    UStaticMeshComponent* Shape(AActor* Actor, FName Name, const TCHAR* Path, FVector Position, FVector Size, bool Solid = false)
+    FVector Barricade(bool Alien, int32 Slot)
     {
-        auto* Mesh = Actor->CreateDefaultSubobject<UStaticMeshComponent>(Name);
-        if (Actor->GetRootComponent()) Mesh->SetupAttachment(Actor->GetRootComponent());
-        else Actor->SetRootComponent(Mesh);
-        Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, Path));
-        Mesh->SetRelativeLocation(Position);
-        Mesh->SetRelativeScale3D(Size);
-        Mesh->SetCollisionEnabled(Solid ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
-        return Mesh;
+        return FVector((Alien ? 1 : -1) * (600 + (Slot / 6) * 670), (Slot % 6 - 2.5) * 490, 0);
+    }
+    bool Active(UWorld* World)
+    {
+        const auto* State = World->GetGameState<AContactState>();
+        return State && State->Result == EContactResult::Active;
     }
 
-    bool Within(const FVector& Position, const FVector& Target, float Radius)
+    // Original carapace built along the facing axis. Narrow rings form the snout,
+    // flared brow and swept crest. Separate curved mandibles frame the visor.
+    void FitRaiderCarapace(AContactResponder* Unit)
     {
-        return FVector::DistSquared(Position, Target) <= FMath::Square(Radius);
+        auto* Shell=NewObject<UProceduralMeshComponent>(Unit);
+        Shell->SetupAttachment(Unit->GetRootComponent());
+        Shell->SetRelativeLocation(FVector(0,0,66));
+        Shell->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Shell->RegisterComponent();
+        int Section=0;
+        auto Loft=[&](const TArray<FVector>& Spine,const TArray<FVector2D>& Radii,FLinearColor Color)
+        {
+            TArray<FVector> Vertices,Normals;
+            TArray<int32> Faces;
+            constexpr int Sides=10;
+            for (int Ring=0; Ring<Spine.Num(); ++Ring)
+                for (int Edge=0; Edge<Sides; ++Edge)
+                {
+                    const double A=2*PI*Edge/Sides;
+                    const FVector N(0,FMath::Cos(A),FMath::Sin(A));
+                    Vertices.Add(Spine[Ring]+FVector(0,N.Y*Radii[Ring].X,N.Z*Radii[Ring].Y));
+                    Normals.Add(N);
+                    if (Ring==Spine.Num()-1) continue;
+                    const int K=Ring*Sides+Edge, J=Ring*Sides+(Edge+1)%Sides;
+                    Faces.Append({K,J+Sides,J,K,K+Sides,J+Sides});
+                }
+            Shell->CreateMeshSection(Section,Vertices,Faces,Normals,{},{},{},false);
+            auto* Mat=UMaterialInstanceDynamic::Create(LoadObject<UMaterialInterface>(nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial")),Unit);
+            Mat->SetVectorParameterValue(TEXT("Color"),Color);
+            Shell->SetMaterial(Section++,Mat);
+        };
+        Loft({{26,0,-3},{17,0,3},{1,0,8},{-20,0,16},{-43,0,24},{-59,0,27}},
+             {{1,1},{14,8},{20,14},{17,10},{7,5},{.2f,.2f}},{.22f,.042f,.045f});
+        for (int Side : {-1,1})
+        {
+            Loft({{29.,Side*8.,-16},{20.,Side*16.,-9},{4.,Side*17.,-1},{-12.,Side*13.,3}},
+                 {{.3f,.3f},{3,4},{4,5},{1,1}},{.55f,.36f,.20f});
+            Loft({{24.,Side*8.,3},{18.,Side*14.,5},{9.,Side*18.,7}},
+                 {{.3f,.3f},{3,2},{.3f,.3f}},{1.f,.18f,.025f});
+        }
     }
 }
 
 void AContactState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(AContactState, ScannedMask);
     DOREPLIFETIME(AContactState, Result);
-}
-
-void AContactMember::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-    DOREPLIFETIME(AContactMember, Evidence);
-    DOREPLIFETIME(AContactMember, Health);
+    DOREPLIFETIME(AContactState, Allies);
+    DOREPLIFETIME(AContactState, Raiders);
+    DOREPLIFETIME(AContactState, Uplink);
 }
 
 AContactResponder::AContactResponder()
 {
-    bUseControllerRotationYaw = false;
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->MaxWalkSpeed = 460;
-    Shape(this, TEXT("FieldSuit"), Sphere, {0,0,-10}, {.49,.43,1.15});
-    Shape(this, TEXT("Helmet"), Sphere, {0,0,61}, FVector(.42));
+    PrimaryActorTick.bCanEverTick = true;
+    GetCharacterMovement()->MaxWalkSpeed = 440;
+    GetCharacterMovement()->bRunPhysicsWithNoController = true;
+    bUseControllerRotationYaw = true;
+    GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
+    GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    GetMesh()->SetRelativeLocationAndRotation({0,0,-88},FRotator(0,-90,0));
+    GetMesh()->SetSkeletalMesh(LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple")));
+    IdlePose = LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS"));
+    JogPose = LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Mannequins/Anims/Rifle/Jog/MF_Rifle_Jog_Fwd"));
+    Report = LoadObject<USoundBase>(nullptr,TEXT("/Game/XRFramework/Audio/Fire01"));
+    Gun = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Rifle"));
+    Gun->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Game/Weapons/Rifle/Meshes/SM_Rifle")));
+    Gun->SetupAttachment(GetMesh(), TEXT("hand_r"));
+    Gun->SetAbsolute(false,true,false);
+    Gun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     auto* Boom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     Boom->SetupAttachment(RootComponent);
-    Boom->SetRelativeLocation({0,0,60});
-    Boom->TargetArmLength = 350;
+    Boom->SetRelativeLocation({0,0,55});
+    Boom->TargetArmLength = 250;
+    Boom->SocketOffset = {0,58,12};
     Boom->bUsePawnControlRotation = true;
     auto* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(Boom, USpringArmComponent::SocketName);
 }
 
+void AContactResponder::BeginPlay()
+{
+    Super::BeginPlay();
+    Animate(false);
+}
+
+void AContactResponder::AssignPost(bool Alien, int32 Index)
+{
+    Slot = Index;
+    bAlien = Alien;
+    Health = Alien ? 110 : 100;
+    if (Alien)
+    {
+        GetMesh()->SetSkeletalMesh(LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple")));
+        GetMesh()->SetRelativeScale3D({1.18,.8f,1.08});
+        FitRaiderCarapace(this);
+    }
+    for (int32 i=0; i<GetMesh()->GetNumMaterials(); ++i)
+        if (auto* Mat = GetMesh()->CreateDynamicMaterialInstance(i))
+            Mat->SetVectorParameterValue(TEXT("Tint"), Alien ? FLinearColor(.85f,.09f,.025f) : FLinearColor(.12f,.53f,.62f));
+    GetCharacterMovement()->MaxWalkSpeed = 240;
+    NextShot = GetWorld()->GetTimeSeconds() + FMath::FRandRange(.5f,2);
+    Destination = GetActorLocation();
+    Animate(false);
+}
+
+void AContactResponder::Animate(bool Moving)
+{
+    bJog = Moving;
+    GetMesh()->PlayAnimation(Moving ? JogPose : IdlePose,true);
+}
+
+void AContactResponder::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(AContactResponder,Health);
+    DOREPLIFETIME(AContactResponder,Ammo);
+    DOREPLIFETIME(AContactResponder,bReloading);
+}
+
 void AContactResponder::SetupPlayerInputComponent(UInputComponent* Input)
 {
     Super::SetupPlayerInputComponent(Input);
-    Input->BindAxis("Forward", this, &AContactResponder::Forward);
-    Input->BindAxis("Right", this, &AContactResponder::Right);
-    Input->BindAxis("Turn", this, &APawn::AddControllerYawInput);
-    Input->BindAxis("Look", this, &APawn::AddControllerPitchInput);
-    Input->BindAction("Sprint", IE_Pressed, this, &AContactResponder::SprintOn);
-    Input->BindAction("Sprint", IE_Released, this, &AContactResponder::SprintOff);
-    Input->BindAction("Scan", IE_Pressed, this, &AContactResponder::ServerScan);
+    Input->BindAxis("Forward",this,&AContactResponder::Forward);
+    Input->BindAxis("Right",this,&AContactResponder::Right);
+    Input->BindAxis("Turn",this,&APawn::AddControllerYawInput);
+    Input->BindAxis("Look",this,&APawn::AddControllerPitchInput);
+    Input->BindAction("Sprint",IE_Pressed,this,&AContactResponder::SprintOn);
+    Input->BindAction("Sprint",IE_Released,this,&AContactResponder::SprintOff);
+    Input->BindAction("Fire",IE_Pressed,this,&AContactResponder::FireOn);
+    Input->BindAction("Fire",IE_Released,this,&AContactResponder::FireOff);
+    Input->BindAction("Reload",IE_Pressed,this,&AContactResponder::Reload);
+    Input->BindAction("Retry",IE_Pressed,this,&AContactResponder::Retry);
 }
-
-void AContactResponder::Forward(float Value)
+void AContactResponder::Forward(float V) { AddMovementInput(GetActorForwardVector(),V); }
+void AContactResponder::Right(float V) { AddMovementInput(GetActorRightVector(),V); }
+void AContactResponder::SprintOn() { ServerSprint(true); }
+void AContactResponder::SprintOff() { ServerSprint(false); }
+void AContactResponder::ServerSprint_Implementation(bool On) { GetCharacterMovement()->MaxWalkSpeed = On ? 700 : 440; }
+void AContactResponder::FireOn() { SetTrigger(true); }
+void AContactResponder::FireOff() { SetTrigger(false); }
+void AContactResponder::SetTrigger_Implementation(bool Down) { bTrigger = Down; }
+void AContactResponder::Reload() { ServerReload(); }
+void AContactResponder::ServerReload_Implementation()
 {
-    AddMovementInput(FRotator(0,GetControlRotation().Yaw,0).Vector(), Value);
-}
-
-void AContactResponder::Right(float Value)
-{
-    AddMovementInput(FRotator(0,GetControlRotation().Yaw + 90,0).Vector(), Value);
-}
-
-void AContactResponder::SprintOn() { GetCharacterMovement()->MaxWalkSpeed = 730; ServerSprint(true); }
-void AContactResponder::SprintOff() { GetCharacterMovement()->MaxWalkSpeed = 460; ServerSprint(false); }
-void AContactResponder::ServerSprint_Implementation(bool Enabled)
-{
-    GetCharacterMovement()->MaxWalkSpeed = Enabled ? 730 : 460;
-}
-
-void AContactResponder::ServerScan_Implementation()
-{
-    auto* State = GetWorld()->GetGameState<AContactState>();
-    auto* Member = GetPlayerState<AContactMember>();
-    if (!Member || Member->Health <= 0 || !State || State->Result != EContactResult::Active) return;
-    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Stations); ++Index)
+    if (Health && Ammo < 30 && !bReloading && Active(GetWorld()))
     {
-        const int32 Bit = 1 << Index;
-        if (!(State->ScannedMask & Bit) && Within(GetActorLocation(), Stations[Index], 260))
-        {
-            State->ScannedMask |= Bit;
-            ++Member->Evidence;
-            UE_LOG(LogTemp, Display, TEXT("CONTACT scan=%d mask=%d"), Index, State->ScannedMask);
-            break;
-        }
+        bReloading = true;
+        ReloadAt = GetWorld()->GetTimeSeconds() + 1.6;
     }
 }
-
-AContactField::AContactField()
+void AContactResponder::Retry()
 {
-    bReplicates = true;
-    bAlwaysRelevant = true;
-    SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("SurveyRange")));
-    auto* Sun = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("DesertSun"));
-    Sun->SetupAttachment(RootComponent);
-    Sun->SetRelativeRotation(FRotator(-52,-35,0));
-    Sun->SetLightColor(FLinearColor(1.f,.84f,.62f));
-    Shape(this, TEXT("Basin"), Cube, {1200,550,-100}, {110,105,2}, true);
-    Shape(this, TEXT("NorthRim"), Cube, {1200,5750,125}, {110,1,2.5}, true);
-    Shape(this, TEXT("SouthRim"), Cube, {1200,-4650,125}, {110,1,2.5}, true);
-    Shape(this, TEXT("EastRim"), Cube, {6650,550,125}, {1,105,2.5}, true);
-    Shape(this, TEXT("WestRim"), Cube, {-4250,550,125}, {1,105,2.5}, true);
-    Shape(this, TEXT("LandingPad"), Cube, {0,0,5}, {7,7,.1}, true);
-    Shape(this, TEXT("Antenna"), Cube, Stations[0], {.2,.2,3.6});
-    Shape(this, TEXT("Dish"), Sphere, Stations[0]+FVector(0,0,175), {1.5,1.5,.35});
-    Shape(this, TEXT("Hull"), Cone, Stations[1], {2.8,1.3,1.8});
-    Shape(this, TEXT("WeatherPod"), Sphere, Stations[2], {1.1,1.1,1.8});
-    for (int32 Index = 0; Index < 18; ++Index)
-    {
-        const float Angle = 2 * PI * Index / 18;
-        const FVector Center(1200 + 5300*FMath::Cos(Angle), 550 + 4900*FMath::Sin(Angle), 100);
-        Shape(this, *FString::Printf(TEXT("Mesa%d"),Index), Cone, Center, {15,12,6.0 + Index%5});
-    }
+    if (!Active(GetWorld()) && GetNetMode()==NM_Standalone)
+        UGameplayStatics::OpenLevel(this,TEXT("/Engine/Maps/Entry"));
 }
 
-AContactStalker::AContactStalker()
+void AContactResponder::Think(double Now)
 {
-    bReplicates = true;
-    SetReplicateMovement(true);
-    PrimaryActorTick.bCanEverTick = true;
-    SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Origin")));
-    Shape(this, TEXT("Carapace"), Sphere, {}, {.95,.65,.6});
-    Shape(this, TEXT("Crest"), Cone, {0,0,45}, {.5,.45,.7});
-}
-
-void AContactStalker::Tick(float Delta)
-{
-    Super::Tick(Delta);
-    auto* State = GetWorld()->GetGameState<AContactState>();
-    if (!HasAuthority() || !State || State->Result != EContactResult::Active) return;
-    AContactResponder* Target = nullptr;
-    double Closest = TNumericLimits<double>::Max();
+    const FVector Here = GetActorLocation();
+    FVector Post = Barricade(bAlien,Slot);
+    const double Side = bAlien ? 1 : -1;
+    Destination = Post + FVector(Side*125, Now < HideUntil ? 0 : 170, 0);
+    double Best = TNumericLimits<double>::Max();
+    Target.Reset();
+    FCollisionQueryParams Query(SCENE_QUERY_STAT(SquadSight),false,this);
     for (TActorIterator<AContactResponder> It(GetWorld()); It; ++It)
     {
-        auto* Member = It->GetPlayerState<AContactMember>();
-        const double Distance = FVector::DistSquared(GetActorLocation(), It->GetActorLocation());
-        if (Member && Member->Health > 0 && Distance < Closest)
-        {
-            Target = *It;
-            Closest = Distance;
-        }
+        if (It->bAlien == bAlien || It->Health <= 0) continue;
+        const double Range = FVector::DistSquared(Here,It->GetActorLocation());
+        if (Range >= Best) continue;
+        FHitResult Hit;
+        GetWorld()->LineTraceSingleByChannel(Hit, Here+FVector(0,0,45), It->GetActorLocation()+FVector(0,0,30), ECC_Visibility,Query);
+        if (Hit.GetActor() == *It) { Target = *It; Best = Range; }
     }
-    if (!Target) return;
-    const FVector Offset = Target->GetActorLocation() - GetActorLocation();
-    const FVector Step = Offset.GetSafeNormal2D() * FMath::Min(Offset.Size2D(), 250.0 * Delta);
-    AddActorWorldOffset(Step);
+    // Step around our own barrier before advancing to a new firing angle.
+    if (Now >= HideUntil && !Target.IsValid() && FVector::Dist2D(Here,Destination) < 240)
+        Destination = Post + FVector(-Side*230,195,0);
+}
+
+void AContactResponder::Tick(float Delta)
+{
+    Super::Tick(Delta);
+    if (!Health || !Active(GetWorld())) return;
+    const bool Moving = GetVelocity().Size2D()>35;
+    if (Moving != bJog) Animate(Moving);
+    // The template rifle's barrel runs along local +Y. Keep its grip on the
+    // animated palm while the muzzle follows the view or squad target.
+    FVector AimDirection=GetBaseAimRotation().Vector();
+    if (IsTrooper())
+        AimDirection=Target.IsValid() ? (Target->GetActorLocation()+FVector(0,0,25)-Gun->GetComponentLocation()).GetSafeNormal() : GetActorForwardVector();
+    Gun->SetWorldRotation(FRotationMatrix::MakeFromYZ(AimDirection,FVector::UpVector).Rotator());
+    if (!HasAuthority()) return;
     const double Now = GetWorld()->GetTimeSeconds();
-    if (Now < NextHit || !Within(GetActorLocation(), Target->GetActorLocation(), 150)) return;
-    NextHit = Now + 1.25;
-    auto* Victim = Target->GetPlayerState<AContactMember>();
-    Victim->Health = FMath::Max(0, Victim->Health - 20);
-    UE_LOG(LogTemp, Display, TEXT("CONTACT hit player=%d health=%d"), Victim->GetPlayerId(), Victim->Health);
-    if (Victim->Health == 0) Target->GetCharacterMovement()->DisableMovement();
+    if (bReloading && Now >= ReloadAt)
+    {
+        Ammo=30;
+        bReloading=false;
+        if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player reloaded ammo=%d"),Ammo);
+    }
+    if (IsTrooper())
+    {
+        if (Now >= NextThink) { Think(Now); NextThink=Now+FMath::FRandRange(.18f,.28f); }
+        FVector Direction = Destination - GetActorLocation();
+        if (Direction.Size2D()>35) AddMovementInput(Direction.GetSafeNormal2D(),1,true);
+        auto* Enemy = Target.Get();
+        FVector Facing = Enemy ? Enemy->GetActorLocation()-GetActorLocation() : Direction;
+        if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
+        if (Enemy && Enemy->Health && Now >= NextShot && Now>=HideUntil)
+            Shoot(Enemy->GetActorLocation()+FVector(0,0,25),true);
+        return;
+    }
+    if (bTrigger && !bReloading && Now>=NextShot && Controller)
+    {
+        FVector Eye; FRotator View;
+        Controller->GetPlayerViewPoint(Eye,View);
+        FHitResult Sight;
+        FVector End=Eye+View.Vector()*14000;
+        GetWorld()->LineTraceSingleByChannel(Sight,Eye,End,ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
+        Shoot(Sight.bBlockingHit ? Sight.ImpactPoint : End,false);
+    }
+}
+
+void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
+{
+    if (bReloading) return;
+    if (Ammo<=0) { ServerReload(); return; }
+    --Ammo;
+    if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player fired ammo=%d position=%s"),Ammo,*GetActorLocation().ToCompactString());
+    const double Now=GetWorld()->GetTimeSeconds();
+    NextShot=Now+(Scatter ? FMath::FRandRange(.7f,1.45) : .13f);
+    const FVector From=GetActorLocation()+FVector(0,0,45)+GetActorForwardVector()*38;
+    FVector Dir=(Aim-From).GetSafeNormal();
+    if (Scatter) Dir=FMath::VRandCone(Dir,FMath::DegreesToRadians(2.4f));
+    FHitResult Hit;
+    FVector End=From+Dir*14000;
+    GetWorld()->LineTraceSingleByChannel(Hit,From,End,ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
+    if (Hit.bBlockingHit) End=Hit.ImpactPoint;
+    if (auto* Victim=Cast<AContactResponder>(Hit.GetActor()); Victim && Victim->bAlien!=bAlien)
+        Victim->ReceiveHit(Scatter ? 9 : 34,this);
+    ShotFX(Gun->GetComponentTransform().TransformPosition(FVector(0,51,9)),End,Hit.bBlockingHit);
+}
+
+void AContactResponder::ShotFX_Implementation(FVector_NetQuantize From,FVector_NetQuantize To,bool Hit)
+{
+    if (GetNetMode()==NM_DedicatedServer) return;
+    const FColor Color=bAlien ? FColor(255,63,38) : FColor(255,214,109);
+    DrawDebugLine(GetWorld(),From,To,Color,false,.075f,0,1.4f);
+    if (Hit) DrawDebugPoint(GetWorld(),To,5,Color,false,.13f);
+    const auto* Listener=UGameplayStatics::GetPlayerCameraManager(this,0);
+    if (Report && Listener && FVector::DistSquared(From,Listener->GetCameraLocation()) < FMath::Square(5500.f))
+        UGameplayStatics::PlaySoundAtLocation(this,Report,From,IsTrooper() ? .06f : .38f,bAlien ? 1.45f : .88f);
+}
+
+void AContactResponder::ReceiveHit(int32 Damage,AContactResponder* Shooter)
+{
+    if (!HasAuthority() || !Health || Shooter->bAlien==bAlien) return;
+    Health=FMath::Max(0,Health-Damage);
+    if (IsTrooper()) HideUntil=GetWorld()->GetTimeSeconds()+FMath::FRandRange(.65f,1.5);
+    UE_LOG(LogTemp,Display,TEXT("BATTLE hit %s[%d] -> %s[%d] hp=%d"),Shooter->bAlien?TEXT("alien"):TEXT("unit"),Shooter->Slot,bAlien?TEXT("alien"):TEXT("unit"),Slot,Health);
+    if (!Health)
+    {
+        GetCharacterMovement()->DisableMovement();
+        GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        GetMesh()->SetRelativeRotation(FRotator(0,-90,85));
+        GetMesh()->bPauseAnims=true;
+    }
 }
 
 AContactMode::AContactMode()
 {
-    GameStateClass = AContactState::StaticClass();
-    PlayerStateClass = AContactMember::StaticClass();
-    DefaultPawnClass = AContactResponder::StaticClass();
-    HUDClass = AContactHUD::StaticClass();
-    PrimaryActorTick.bCanEverTick = true;
+    GameStateClass=AContactState::StaticClass();
+    DefaultPawnClass=AContactResponder::StaticClass();
+    HUDClass=AContactHUD::StaticClass();
+    PrimaryActorTick.bCanEverTick=true;
 }
-
-void AContactMode::InitGame(const FString& Map, const FString& Options, FString& Error)
+void AContactMode::InitGame(const FString& Map,const FString& Options,FString& Error)
 {
-    Super::InitGame(Map, Options, Error);
-    auto* World = GetWorld();
-    World->SpawnActor<AContactField>();
-    for (int32 Index = 0; Index < 12; ++Index)
-    {
-        const FVector Location(-600 + 150*(Index%4), -450 + 150*(Index/4), 115);
-        World->SpawnActor<APlayerStart>(Location, FRotator::ZeroRotator);
-    }
-    World->SpawnActor<AContactStalker>(FVector(3200,-1650,90), FRotator::ZeroRotator);
+    Super::InitGame(Map,Options,Error);
+    GetWorld()->SpawnActor<AContactField>();
+    auto* Start=GetWorld()->SpawnActor<APlayerStart>(FVector(-2200,-520,100),FRotator(0,13,0));
+    if (Start) Start->PlayerStartTag=TEXT("AlliedDeployment");
 }
-
+AActor* AContactMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+    for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
+        if (It->PlayerStartTag==TEXT("AlliedDeployment")) return *It;
+    return Super::ChoosePlayerStart_Implementation(Player);
+}
+void AContactMode::RestartPlayer(AController* NewPlayer)
+{
+    Super::RestartPlayer(NewPlayer);
+    if (auto* Pawn=Cast<AContactResponder>(NewPlayer->GetPawn()))
+        UE_LOG(LogTemp,Display,TEXT("BATTLE deployed hp=%d ammo=%d position=%s"),Pawn->Health,Pawn->Ammo,*Pawn->GetActorLocation().ToCompactString());
+}
+void AContactMode::StartPlay()
+{
+    Super::StartPlay();
+    for(int32 Side=0; Side<2; ++Side)
+        for(int32 Slot=0; Slot<12; ++Slot)
+        {
+            const FVector Post=Barricade(Side!=0,Slot);
+            const FVector Start=Post+FVector((Side?1:-1)*440,195,100);
+            auto* Unit=GetWorld()->SpawnActor<AContactResponder>(Start,FRotator(0,Side?180:0,0));
+            if (ensure(Unit)) Unit->AssignPost(Side!=0,Slot);
+        }
+}
 void AContactMode::Tick(float Delta)
 {
     Super::Tick(Delta);
-    auto* State = GetGameState<AContactState>();
-    if (!State || State->Result != EContactResult::Active) return;
-    int32 Responders = 0, Survivors = 0, OnPad = 0;
+    auto* State=GetGameState<AContactState>();
+    if (!State || State->Result!=EContactResult::Active) return;
+    auto* Player=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
+    if (!Player) return;
+    int32 Allies=0,Raiders=0;
     for (TActorIterator<AContactResponder> It(GetWorld()); It; ++It)
-    {
-        auto* Member = It->GetPlayerState<AContactMember>();
-        if (!Member || !It->GetController()) continue;
-        ++Responders;
-        if (Member->Health <= 0) continue;
-        ++Survivors;
-        if (Within(It->GetActorLocation(), Landing, 320)) ++OnPad;
-    }
-    if (Responders && !Survivors) State->Result = EContactResult::Lost;
-    else if (State->ScannedMask == 7 && Survivors && OnPad == Survivors) State->Result = EContactResult::Extracted;
-    if (State->Result != EContactResult::Active)
-        UE_LOG(LogTemp, Display, TEXT("CONTACT end=%d survivors=%d"), int32(State->Result), Survivors);
-}
-
-void AContactHUD::DrawHUD()
-{
-    Super::DrawHUD();
-    auto* State = GetWorld()->GetGameState<AContactState>();
-    if (!State || !Canvas) return;
-    float Y = 28;
-    auto Line = [&](const FString& Text) {
-        DrawText(Text, FLinearColor::White, 30, Y, nullptr, 1.35f);
-        Y += 25;
-    };
-    Line(TEXT("EARTH: CONTACT   /   ROSWELL SURVEY RANGE"));
-    if (State->Result == EContactResult::Extracted) Line(TEXT("EXTRACTED   /   Evidence secured"));
-    else if (State->Result == EContactResult::Lost) Line(TEXT("SIGNAL LOST   /   Team down"));
-    else if (State->ScannedMask == 7) Line(TEXT("Return all surviving responders to the landing pad"));
-    else Line(TEXT("WASD move   |   Mouse look   |   Shift sprint   |   E scan"));
-    const APawn* Viewer = GetOwningPawn();
-    auto Mark = [&](FVector Where, const FString& Name) {
-        if (!Viewer) return;
-        const int32 Metres = FMath::RoundToInt(FVector::Dist(Viewer->GetActorLocation(), Where) / 100);
-        Line(FString::Printf(TEXT("%s   %d m"), *Name, Metres));
-        FVector2D Screen;
-        if (GetOwningPlayerController()->ProjectWorldLocationToScreen(Where + FVector(0,0,185), Screen, true))
-            DrawText(Name, FLinearColor::Yellow, Screen.X, Screen.Y);
-    };
-    for (int32 Index = 0; Index < 3; ++Index)
-    {
-        if (State->ScannedMask & (1 << Index)) Line(FString(Labels[Index]) + TEXT("   [scanned]"));
-        else Mark(Stations[Index], Labels[Index]);
-    }
-    if (State->ScannedMask == 7) Mark(Landing,TEXT("Extraction"));
-    for (APlayerState* Player : State->PlayerArray)
-        if (auto* Member = Cast<AContactMember>(Player))
-            Line(FString::Printf(TEXT("%s   HP %d   Evidence %d"), *Member->GetPlayerName(), Member->Health, Member->Evidence));
+        if (It->IsTrooper() && It->Health>0) { if(It->IsAlien()) ++Raiders; else ++Allies; }
+    State->Allies=Allies;
+    State->Raiders=Raiders;
+    if (FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
+        State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
+    if (!Player->Health) State->Result=EContactResult::Lost;
+    else if (Raiders==0 || State->Uplink>=10) State->Result=EContactResult::Won;
+    if (State->Result!=EContactResult::Active)
+        UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);
 }

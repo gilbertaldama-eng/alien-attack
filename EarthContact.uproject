@@ -9,7 +9,7 @@
       "LoadingPhase": "Default"
     }
   ],
-  "TargetPlatforms": [
+  "Plugins": [{"Name":"ProceduralMeshComponent","Enabled":true}], "TargetPlatforms": [
     "Windows"
   ]
 }

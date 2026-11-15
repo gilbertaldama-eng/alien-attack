@@ -4,32 +4,23 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/HUD.h"
-#include "GameFramework/PlayerState.h"
 #include "ContactMission.generated.h"
 
+class UAnimSequence;
+class USoundBase;
+
 UENUM()
-enum class EContactResult : uint8 { Active, Extracted, Lost };
+enum class EContactResult : uint8 { Active, Won, Lost };
 
 UCLASS()
 class AContactState : public AGameStateBase
 {
     GENERATED_BODY()
 public:
-    UPROPERTY(Replicated) int32 ScannedMask = 0;
     UPROPERTY(Replicated) EContactResult Result = EContactResult::Active;
-    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-};
-
-UCLASS()
-class AContactMember : public APlayerState
-{
-    GENERATED_BODY()
-public:
-    // All responders belong to the same team and role in this mission.
-    UPROPERTY(EditDefaultsOnly) FName Team = TEXT("Field Unit");
-    UPROPERTY(EditDefaultsOnly) FName SurveyRole = TEXT("Surveyor");
-    UPROPERTY(Replicated) int32 Evidence = 0;
-    UPROPERTY(Replicated) int32 Health = 100;
+    UPROPERTY(Replicated) int32 Allies = 12;
+    UPROPERTY(Replicated) int32 Raiders = 12;
+    UPROPERTY(Replicated) float Uplink = 0;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
@@ -39,25 +30,44 @@ class AContactResponder : public ACharacter
     GENERATED_BODY()
 public:
     AContactResponder();
+    void BeginPlay() override;
+    void Tick(float Delta) override;
     void SetupPlayerInputComponent(UInputComponent* Input) override;
+    void AssignPost(bool Alien, int32 Index);
+    bool IsAlien() const { return bAlien; }
+    bool IsTrooper() const { return Slot != INDEX_NONE; }
+    UPROPERTY(Replicated) int32 Health = 100;
+    UPROPERTY(Replicated) int32 Ammo = 30;
+    UPROPERTY(Replicated) bool bReloading = false;
+    void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
     void Forward(float Value);
     void Right(float Value);
     void SprintOn();
     void SprintOff();
-    UFUNCTION(Server, Reliable) void ServerSprint(bool Enabled);
-    UFUNCTION(Server, Reliable) void ServerScan();
-};
-
-UCLASS()
-class AContactStalker : public AActor
-{
-    GENERATED_BODY()
-public:
-    AContactStalker();
-    void Tick(float Delta) override;
-private:
-    double NextHit = 0;
+    void FireOn();
+    void FireOff();
+    void Reload();
+    void Retry();
+    void Think(double Now);
+    void Shoot(const FVector& Aim, bool Scatter);
+    void ReceiveHit(int32 Damage, AContactResponder* Shooter);
+    void Animate(bool Moving);
+    UFUNCTION(Server,Reliable) void ServerSprint(bool Enabled);
+    UFUNCTION(Server,Reliable) void SetTrigger(bool Down);
+    UFUNCTION(Server,Reliable) void ServerReload();
+    UFUNCTION(NetMulticast,Unreliable) void ShotFX(FVector_NetQuantize From, FVector_NetQuantize To, bool Hit);
+    UPROPERTY() TObjectPtr<UAnimSequence> IdlePose;
+    UPROPERTY() TObjectPtr<UAnimSequence> JogPose;
+    UPROPERTY() TObjectPtr<USoundBase> Report;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> Gun;
+    TWeakObjectPtr<AContactResponder> Target;
+    FVector Destination = FVector::ZeroVector;
+    int32 Slot = INDEX_NONE;
+    bool bAlien = false;
+    bool bTrigger = false;
+    bool bJog = false;
+    double NextShot = 0, NextThink = 0, ReloadAt = 0, HideUntil = 0;
 };
 
 UCLASS()
@@ -66,6 +76,7 @@ class AContactField : public AActor
     GENERATED_BODY()
 public:
     AContactField();
+    void BeginPlay() override;
 };
 
 UCLASS()
@@ -75,6 +86,9 @@ class AContactMode : public AGameModeBase
 public:
     AContactMode();
     void InitGame(const FString& Map, const FString& Options, FString& Error) override;
+    void StartPlay() override;
+    AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+    void RestartPlayer(AController* NewPlayer) override;
     void Tick(float Delta) override;
 };
 

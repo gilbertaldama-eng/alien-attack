@@ -12,4 +12,6 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-start "Earth Contact" "%EDITOR%" "%~dp0EarthContact.uproject" /Engine/Maps/Entry -game -windowed -ResX=1100 -ResY=700 -Log=Solo.log
+set "MAP=/Engine/Maps/Entry"
+if /I "%~1"=="relay" set "MAP=/Engine/Maps/Entry?Mission=Relay"
+start "Earth Contact" "%EDITOR%" "%~dp0EarthContact.uproject" "%MAP%" -game -windowed -ResX=1100 -ResY=700 -Log=Solo.log

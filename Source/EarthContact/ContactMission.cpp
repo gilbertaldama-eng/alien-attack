@@ -144,6 +144,20 @@ void AContactResponder::Animate(bool Moving)
     GetMesh()->PlayAnimation(Moving ? JogPose : IdlePose,true);
 }
 
+void AContactResponder::AssignHunter(int32 Index)
+{
+    AssignPost(true,Index);
+    Health=HunterHP;
+    const float HeightCm=30.48f;
+    const float Scale=HeightCm/(2*GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+    SetActorScale3D(FVector(Scale));
+    GetMesh()->SetRelativeScale3D(FVector(.96f));
+    Gun->SetVisibility(false);
+    GetCharacterMovement()->MaxWalkSpeed=195;
+    GetCharacterMovement()->MaxStepHeight=12;
+    UE_LOG(LogTemp,Display,TEXT("HUNT hunter=%d hp=%d capsule_cm=%.2f"),Index,Health,2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+}
+
 void AContactResponder::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -186,12 +200,31 @@ void AContactResponder::ServerReload_Implementation()
 void AContactResponder::Retry()
 {
     if (!Active(GetWorld()) && GetNetMode()==NM_Standalone)
-        UGameplayStatics::OpenLevel(this,TEXT("/Engine/Maps/Entry"));
+        UGameplayStatics::OpenLevel(this,TEXT("/Engine/Maps/Entry"),false);
 }
 
 void AContactResponder::Think(double Now)
 {
     const FVector Here = GetActorLocation();
+    if (GetWorld()->GetGameState<AContactState>()->bHunt)
+    {
+        Target=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
+        if (!Target.IsValid()) return;
+        const FVector Toward=(Target->GetActorLocation()-Here).GetSafeNormal2D();
+        Destination=Target->GetActorLocation();
+        FCollisionQueryParams Query(NAME_None,false,this);
+        Query.AddIgnoredActor(Target.Get());
+        for (float Angle : {0.f,45.f,-45.f,85.f,-85.f,120.f,-120.f})
+        {
+            const FVector Step=Toward.RotateAngleAxis(Angle,FVector::UpVector)*90;
+            if (!GetWorld()->SweepTestByChannel(Here,Here+Step,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(6),Query))
+            {
+                Destination=Here+Step;
+                break;
+            }
+        }
+        return;
+    }
     FVector Post = Barricade(bAlien,Slot);
     const double Side = bAlien ? 1 : -1;
     Destination = Post + FVector(Side*125, Now < HideUntil ? 0 : 170, 0);
@@ -240,6 +273,21 @@ void AContactResponder::Tick(float Delta)
         auto* Enemy = Target.Get();
         FVector Facing = Enemy ? Enemy->GetActorLocation()-GetActorLocation() : Direction;
         if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
+        if (GetWorld()->GetGameState<AContactState>()->bHunt)
+        {
+            if (Enemy && Enemy->Health && Now>=NextShot && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<80
+                && FMath::Abs(GetActorLocation().Z-Enemy->GetActorLocation().Z)<115)
+            {
+                FHitResult Contact;
+                GetWorld()->LineTraceSingleByChannel(Contact,GetActorLocation(),Enemy->GetActorLocation(),ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
+                if (Contact.GetActor()==Enemy)
+                {
+                    Enemy->ReceiveHit(2,this);
+                    NextShot=Now+2.5;
+                }
+            }
+            return;
+        }
         if (Enemy && Enemy->Health && Now >= NextShot && Now>=HideUntil)
             Shoot(Enemy->GetActorLocation()+FVector(0,0,25),true);
         return;
@@ -271,7 +319,7 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     GetWorld()->LineTraceSingleByChannel(Hit,From,End,ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
     if (Hit.bBlockingHit) End=Hit.ImpactPoint;
     if (auto* Victim=Cast<AContactResponder>(Hit.GetActor()); Victim && Victim->bAlien!=bAlien)
-        Victim->ReceiveHit(Scatter ? 9 : 34,this);
+        Victim->ReceiveHit(GetWorld()->GetGameState<AContactState>()->bHunt ? 2 : (Scatter ? 9 : 34),this);
     ShotFX(Gun->GetComponentTransform().TransformPosition(FVector(0,51,9)),End,Hit.bBlockingHit);
 }
 
@@ -330,6 +378,20 @@ void AContactMode::RestartPlayer(AController* NewPlayer)
 void AContactMode::StartPlay()
 {
     Super::StartPlay();
+    auto* State=GetGameState<AContactState>();
+    State->bHunt=GetNetMode()==NM_Standalone && !UGameplayStatics::ParseOption(OptionsString,TEXT("Mission")).Equals(TEXT("Relay"),ESearchCase::IgnoreCase);
+    if (State->bHunt)
+    {
+        State->Allies=0;
+        State->Raiders=5;
+        for(int32 Index=0;Index<5;++Index)
+        {
+            const FVector Start(-1640+Index*30,-780+Index*150,100);
+            auto* Hunter=GetWorld()->SpawnActor<AContactResponder>(Start,FRotator(0,180,0));
+            if (ensure(Hunter)) Hunter->AssignHunter(Index);
+        }
+        return;
+    }
     for(int32 Side=0; Side<2; ++Side)
         for(int32 Slot=0; Slot<12; ++Slot)
         {
@@ -351,7 +413,7 @@ void AContactMode::Tick(float Delta)
         if (It->IsTrooper() && It->Health>0) { if(It->IsAlien()) ++Raiders; else ++Allies; }
     State->Allies=Allies;
     State->Raiders=Raiders;
-    if (FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
+    if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
     else if (Raiders==0 || State->Uplink>=10) State->Result=EContactResult::Won;

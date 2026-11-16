@@ -2,7 +2,9 @@
 
 Double-click **Play Earth Contact.cmd** on Windows with Unreal Engine 5.8.4 installed. It updates the project module if needed and opens the standalone game. Set `UE_ROOT` if Unreal is installed outside the launcher's default Epic Games folder.
 
-You deploy behind **12 allied AI soldiers** facing **12 alien raiders**. Sprint through the yard to the relay mast and spend ten seconds within four metres, or eliminate the hostile squad. Relay progress is cumulative. Concrete cover and buildings stop rifle rounds. The relay's east wall shields an operator approaching from the allied side. If the player falls, the mission ends. Press **Enter** after victory or defeat to redeploy.
+The default **Solo Hunt** pits you alone against five one-foot aliens. Each has 1,000 HP and chases you to attack at close range. Each rifle hit deals 2 damage, so one alien takes 500 hits. Eliminate all five to win. Spare magazines are unlimited.
+
+For the original battle, double-click **Play Relay Battle.cmd**. You deploy behind **12 allied AI soldiers** facing **12 alien raiders**. Sprint through the yard to the relay mast and spend ten seconds within four metres, or eliminate the hostile squad. Relay progress is cumulative. Concrete cover and buildings stop rifle rounds. The relay's east wall shields an operator approaching from the allied side. If the player falls, the mission ends. Press **Enter** after victory or defeat to redeploy.
 
 | Control | Action |
 |---|---|
@@ -23,7 +25,7 @@ $engine = 'C:\Program Files\Epic Games\UE_5.8\Engine'
 $project = (Resolve-Path EarthContact.uproject).Path
 & "$engine\Build\BatchFiles\Build.bat" EarthContactEditor Win64 Development "-Project=$project" -WaitMutex
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-& "$engine\Binaries\Win64\UnrealEditor.exe" $project /Engine/Maps/Entry -game -windowed -Log=Station.log
+& "$engine\Binaries\Win64\UnrealEditor.exe" $project "/Engine/Maps/Entry?Mission=Relay" -game -windowed -Log=Station.log
 ```
 
 For the repeatable relay test, add `-ExecCmds=Contact.TestRelay` on launch. It drives the regular player controls in a fresh mission, records initial counts and the outcome, and requests two screenshots. Search the project log for `RELAY TEST` and `BATTLE`. Enemy hits identify shooter and target slots. Slot -1 is the human player. Playtest evidence is in the Evidence directory.

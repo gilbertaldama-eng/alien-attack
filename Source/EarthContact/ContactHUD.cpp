@@ -14,8 +14,8 @@ void AContactHUD::DrawHUD()
     DrawRect(Ink,20,20,340,94);
     DrawRect(Gold,20,20,4,94);
     DrawText(TEXT("ROSWELL    /    SIGNAL STATION"),Gold,37,29);
-    DrawText(TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
-    DrawText(FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
+    DrawText(State->bHunt ? TEXT("Solo hunt  /  Eliminate all five aliens") : TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
+    DrawText(State->bHunt ? FString::Printf(TEXT("ALIENS LEFT  %d     /     BULLET DAMAGE  2"),State->Raiders) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
     DrawRect(Ink,20,H-86,258,66);
     DrawText(FString::Printf(TEXT("HP  %03d"),Player->Health),Ally,36,H-78,nullptr,1.45);
     DrawText(Player->bReloading ? TEXT("RELOADING") : FString::Printf(TEXT("AMMO  %02d / 30"),Player->Ammo),Gold,130,H-77);
@@ -31,15 +31,16 @@ void AContactHUD::DrawHUD()
     {
         if (!It->IsTrooper() || !It->Health) continue;
         FVector2D S;
-        if (GetOwningPlayerController()->ProjectWorldLocationToScreen(It->GetActorLocation()+FVector(0,0,115),S,true))
+        if (GetOwningPlayerController()->ProjectWorldLocationToScreen(It->GetActorLocation()+FVector(0,0,State->bHunt ? 25 : 115),S,true))
         {
             const auto Color=It->IsAlien()?Red:Ally;
             DrawRect(Ink,S.X-8,S.Y,16,4);
-            DrawRect(Color,S.X-8,S.Y,16*It->Health/(It->IsAlien()?110.f:100.f),3);
+            DrawRect(Color,S.X-8,S.Y,16*It->Health/(State->bHunt ? AContactResponder::HunterHP : (It->IsAlien()?110.f:100.f)),3);
+            if (State->bHunt) DrawText(FString::FromInt(It->Health),Red,S.X-12,S.Y-15);
         }
     }
     FVector2D S;
-    if (GetOwningPlayerController()->ProjectWorldLocationToScreen(FVector(0,0,430),S,true))
+    if (!State->bHunt && GetOwningPlayerController()->ProjectWorldLocationToScreen(FVector(0,0,430),S,true))
         DrawText(TEXT("RELAY"),Gold,S.X-15,S.Y);
     if (State->Result!=EContactResult::Active)
     {

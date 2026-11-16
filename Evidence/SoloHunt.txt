@@ -1,0 +1,8 @@
+[2026.11.16-11.28.02:824][  0]LogTemp: Display: HUNT hunter=0 hp=1000 capsule_cm=30.48
+[2026.11.16-11.28.02:825][  0]LogTemp: Display: HUNT hunter=1 hp=1000 capsule_cm=30.48
+[2026.11.16-11.28.02:826][  0]LogTemp: Display: HUNT hunter=2 hp=1000 capsule_cm=30.48
+[2026.11.16-11.28.02:826][  0]LogTemp: Display: HUNT hunter=3 hp=1000 capsule_cm=30.48
+[2026.11.16-11.28.02:827][  0]LogTemp: Display: HUNT hunter=4 hp=1000 capsule_cm=30.48
+[2026.11.16-11.28.04:654][ 36]LogTemp: Display: BATTLE hit unit[-1] -> alien[1] hp=998
+[2026.11.16-11.28.07:517][197]LogTemp: Display: BATTLE hit alien[1] -> unit[-1] hp=98
+[2026.11.16-11.28.07:529][201]LogTemp: Display: HUNT TEST PASS allies=0 hunters=5 player_hp=98 two_damage=1

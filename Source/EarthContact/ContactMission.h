@@ -21,6 +21,7 @@ public:
     UPROPERTY(Replicated) int32 Allies = 12;
     UPROPERTY(Replicated) int32 Raiders = 12;
     UPROPERTY(Replicated) float Uplink = 0;
+    bool bHunt = false;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
@@ -34,6 +35,8 @@ public:
     void Tick(float Delta) override;
     void SetupPlayerInputComponent(UInputComponent* Input) override;
     void AssignPost(bool Alien, int32 Index);
+    void AssignHunter(int32 Index);
+    static constexpr int32 HunterHP = 1000;
     bool IsAlien() const { return bAlien; }
     bool IsTrooper() const { return Slot != INDEX_NONE; }
     UPROPERTY(Replicated) int32 Health = 100;

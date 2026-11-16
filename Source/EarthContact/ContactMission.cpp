@@ -196,7 +196,7 @@ void AContactResponder::TeleportFlash(bool bArrival)
     const FVector Origin=GetActorLocation()+FVector(0,0,bBoss ? 120.f : 30.f);
     if (auto* Flash=GetWorld()->SpawnActor<APointLight>(Origin,FRotator::ZeroRotator))
     {
-        if (auto* Light=Flash->GetPointLightComponent())
+        if (auto* Light=Flash->PointLightComponent.Get())
         {
             Light->SetLightColor(FLinearColor(.78f,.90f,1.0f));
             Light->SetIntensity(bBoss ? 150000.f : 65000.f);

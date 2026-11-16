@@ -102,6 +102,12 @@ AContactResponder::AContactResponder()
     Gun->SetupAttachment(GetMesh(), TEXT("hand_r"));
     Gun->SetAbsolute(false,true,false);
     Gun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Sidearm = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SidearmProxy"));
+    Sidearm->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube")));
+    Sidearm->SetupAttachment(GetMesh(),TEXT("hand_r"));
+    Sidearm->SetRelativeScale3D(FVector(.05f,.19f,.075f));
+    Sidearm->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Sidearm->SetVisibility(false);
     auto* Boom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     Boom->SetupAttachment(RootComponent);
     Boom->SetRelativeLocation({0,0,55});
@@ -158,12 +164,32 @@ void AContactResponder::AssignHunter(int32 Index)
     UE_LOG(LogTemp,Display,TEXT("HUNT hunter=%d hp=%d capsule_cm=%.2f"),Index,Health,2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 }
 
+void AContactResponder::AssignNordicBoss()
+{
+    AssignPost(true,5);
+    bBoss=true;
+    Health=BossHP;
+    const float HeightCm=243.84f; // eight feet, Unreal units are centimeters
+    const float Scale=HeightCm/(2*GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+    SetActorScale3D(FVector(Scale));
+    GetMesh()->SetRelativeScale3D(FVector(.94f,.83f,1.02f));
+    for (int32 I=0; I<GetMesh()->GetNumMaterials(); ++I)
+        if (auto* Mat=GetMesh()->CreateDynamicMaterialInstance(I))
+            Mat->SetVectorParameterValue(TEXT("Tint"),FLinearColor(.93f,.96f,1.f));
+    Gun->SetVisibility(false);
+    Sidearm->SetVisibility(false);
+    GetCharacterMovement()->MaxWalkSpeed=300;
+    UE_LOG(LogTemp,Display,TEXT("NORDIC BOSS spawned hp=%d height_cm=%.2f"),Health,
+        2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+}
+
 void AContactResponder::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(AContactResponder,Health);
     DOREPLIFETIME(AContactResponder,Ammo);
     DOREPLIFETIME(AContactResponder,bReloading);
+    DOREPLIFETIME(AContactResponder,bPistol);
 }
 
 void AContactResponder::SetupPlayerInputComponent(UInputComponent* Input)
@@ -178,6 +204,8 @@ void AContactResponder::SetupPlayerInputComponent(UInputComponent* Input)
     Input->BindAction("Fire",IE_Pressed,this,&AContactResponder::FireOn);
     Input->BindAction("Fire",IE_Released,this,&AContactResponder::FireOff);
     Input->BindAction("Reload",IE_Pressed,this,&AContactResponder::Reload);
+    Input->BindAction("EquipRifle",IE_Pressed,this,&AContactResponder::EquipRifle);
+    Input->BindAction("EquipPistol",IE_Pressed,this,&AContactResponder::EquipPistol);
     Input->BindAction("Retry",IE_Pressed,this,&AContactResponder::Retry);
 }
 void AContactResponder::Forward(float V) { AddMovementInput(GetActorForwardVector(),V); }
@@ -189,12 +217,26 @@ void AContactResponder::FireOn() { SetTrigger(true); }
 void AContactResponder::FireOff() { SetTrigger(false); }
 void AContactResponder::SetTrigger_Implementation(bool Down) { bTrigger = Down; }
 void AContactResponder::Reload() { ServerReload(); }
+void AContactResponder::EquipRifle() { ServerEquip(false); }
+void AContactResponder::EquipPistol() { ServerEquip(true); }
+void AContactResponder::ServerEquip_Implementation(bool Pistol)
+{
+    if (IsTrooper() || Health<=0 || bPistol==Pistol) return;
+    if (bPistol) PistolAmmo=Ammo; else RifleAmmo=Ammo;
+    bPistol=Pistol;
+    Ammo=bPistol ? PistolAmmo : RifleAmmo;
+    bReloading=false;
+    bTrigger=false;
+    NextShot=GetWorld()->GetTimeSeconds()+.18;
+    Gun->SetVisibility(!bPistol);
+    Sidearm->SetVisibility(bPistol);
+}
 void AContactResponder::ServerReload_Implementation()
 {
-    if (Health && Ammo < 30 && !bReloading && Active(GetWorld()))
+    if (Health && Ammo < (bPistol ? 17 : 30) && !bReloading && Active(GetWorld()))
     {
         bReloading = true;
-        ReloadAt = GetWorld()->GetTimeSeconds() + 1.6;
+        ReloadAt = GetWorld()->GetTimeSeconds() + (bPistol ? 1.25 : 1.6);
     }
 }
 void AContactResponder::Retry()
@@ -257,11 +299,13 @@ void AContactResponder::Tick(float Delta)
     if (IsTrooper())
         AimDirection=Target.IsValid() ? (Target->GetActorLocation()+FVector(0,0,25)-Gun->GetComponentLocation()).GetSafeNormal() : GetActorForwardVector();
     Gun->SetWorldRotation(FRotationMatrix::MakeFromYZ(AimDirection,FVector::UpVector).Rotator());
+    Sidearm->SetWorldRotation(Gun->GetComponentRotation());
     if (!HasAuthority()) return;
     const double Now = GetWorld()->GetTimeSeconds();
     if (bReloading && Now >= ReloadAt)
     {
-        Ammo=30;
+        Ammo=bPistol ? 17 : 30;
+        if (bPistol) PistolAmmo=Ammo; else RifleAmmo=Ammo;
         bReloading=false;
         if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player reloaded ammo=%d"),Ammo);
     }
@@ -275,15 +319,15 @@ void AContactResponder::Tick(float Delta)
         if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
         if (GetWorld()->GetGameState<AContactState>()->bHunt)
         {
-            if (Enemy && Enemy->Health && Now>=NextShot && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<80
+            if (Enemy && Enemy->Health && Now>=NextShot && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<(bBoss ? 170 : 80)
                 && FMath::Abs(GetActorLocation().Z-Enemy->GetActorLocation().Z)<115)
             {
                 FHitResult Contact;
                 GetWorld()->LineTraceSingleByChannel(Contact,GetActorLocation(),Enemy->GetActorLocation(),ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
                 if (Contact.GetActor()==Enemy)
                 {
-                    Enemy->ReceiveHit(2,this);
-                    NextShot=Now+2.5;
+                    Enemy->ReceiveHit(bBoss ? 9 : 2,this);
+                    NextShot=Now+(bBoss ? 1.7 : 2.5);
                 }
             }
             return;
@@ -300,6 +344,7 @@ void AContactResponder::Tick(float Delta)
         FVector End=Eye+View.Vector()*14000;
         GetWorld()->LineTraceSingleByChannel(Sight,Eye,End,ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
         Shoot(Sight.bBlockingHit ? Sight.ImpactPoint : End,false);
+        if (bPistol) bTrigger=false; // Semi-auto: release and press for the next shot.
     }
 }
 
@@ -310,7 +355,7 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     --Ammo;
     if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player fired ammo=%d position=%s"),Ammo,*GetActorLocation().ToCompactString());
     const double Now=GetWorld()->GetTimeSeconds();
-    NextShot=Now+(Scatter ? FMath::FRandRange(.7f,1.45) : .13f);
+    NextShot=Now+(Scatter ? FMath::FRandRange(.7f,1.45) : (bPistol ? .30f : .13f));
     const FVector From=GetActorLocation()+FVector(0,0,45)+GetActorForwardVector()*38;
     FVector Dir=(Aim-From).GetSafeNormal();
     if (Scatter) Dir=FMath::VRandCone(Dir,FMath::DegreesToRadians(2.4f));
@@ -319,8 +364,8 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     GetWorld()->LineTraceSingleByChannel(Hit,From,End,ECC_Visibility,FCollisionQueryParams(NAME_None,false,this));
     if (Hit.bBlockingHit) End=Hit.ImpactPoint;
     if (auto* Victim=Cast<AContactResponder>(Hit.GetActor()); Victim && Victim->bAlien!=bAlien)
-        Victim->ReceiveHit(GetWorld()->GetGameState<AContactState>()->bHunt ? 2 : (Scatter ? 9 : 34),this);
-    ShotFX(Gun->GetComponentTransform().TransformPosition(FVector(0,51,9)),End,Hit.bBlockingHit);
+        Victim->ReceiveHit(Scatter ? 9 : (bPistol ? 38 : 26),this);
+    ShotFX(bPistol && !IsTrooper() ? Sidearm->GetComponentLocation() : Gun->GetComponentTransform().TransformPosition(FVector(0,51,9)),End,Hit.bBlockingHit);
 }
 
 void AContactResponder::ShotFX_Implementation(FVector_NetQuantize From,FVector_NetQuantize To,bool Hit)
@@ -342,6 +387,8 @@ void AContactResponder::ReceiveHit(int32 Damage,AContactResponder* Shooter)
     UE_LOG(LogTemp,Display,TEXT("BATTLE hit %s[%d] -> %s[%d] hp=%d"),Shooter->bAlien?TEXT("alien"):TEXT("unit"),Shooter->Slot,bAlien?TEXT("alien"):TEXT("unit"),Slot,Health);
     if (!Health)
     {
+        if (bBoss)
+            if (auto* State=GetWorld()->GetGameState<AContactState>()) State->bBossDefeated=true;
         GetCharacterMovement()->DisableMovement();
         GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         GetMesh()->SetRelativeRotation(FRotator(0,-90,85));
@@ -416,7 +463,16 @@ void AContactMode::Tick(float Delta)
     if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
-    else if (Raiders==0 || State->Uplink>=10) State->Result=EContactResult::Won;
+    else if (State->bHunt && Raiders==0 && !State->bBossSpawned)
+    {
+        State->bBossSpawned=true;
+        const FVector BossStart(650,500,120);
+        if (auto* Boss=GetWorld()->SpawnActor<AContactResponder>(BossStart,FRotator(0,180,0)))
+            Boss->AssignNordicBoss();
+        else State->Result=EContactResult::Won; // avoid soft-lock if spawn fails
+    }
+    else if (State->bHunt ? State->bBossDefeated : (Raiders==0 || State->Uplink>=10))
+        State->Result=EContactResult::Won;
     if (State->Result!=EContactResult::Active)
         UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);
 }

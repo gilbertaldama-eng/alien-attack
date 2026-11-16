@@ -39,6 +39,7 @@ public:
     void AssignPost(bool Alien, int32 Index);
     void AssignHunter(int32 Index);
     void AssignNordicBoss();
+    void TeleportFlash(bool bArrival);
     static constexpr int32 HunterHP = 90;
     static constexpr int32 BossHP = 550;
     bool IsBoss() const { return bBoss; }

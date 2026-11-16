@@ -22,6 +22,8 @@ public:
     UPROPERTY(Replicated) int32 Raiders = 12;
     UPROPERTY(Replicated) float Uplink = 0;
     bool bHunt = false;
+    bool bBossSpawned = false;
+    bool bBossDefeated = false;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
@@ -36,12 +38,18 @@ public:
     void SetupPlayerInputComponent(UInputComponent* Input) override;
     void AssignPost(bool Alien, int32 Index);
     void AssignHunter(int32 Index);
-    static constexpr int32 HunterHP = 1000;
+    void AssignNordicBoss();
+    static constexpr int32 HunterHP = 90;
+    static constexpr int32 BossHP = 550;
+    bool IsBoss() const { return bBoss; }
     bool IsAlien() const { return bAlien; }
     bool IsTrooper() const { return Slot != INDEX_NONE; }
     UPROPERTY(Replicated) int32 Health = 100;
     UPROPERTY(Replicated) int32 Ammo = 30;
     UPROPERTY(Replicated) bool bReloading = false;
+    UPROPERTY(Replicated) bool bPistol = false;
+    int32 RifleAmmo = 30;
+    int32 PistolAmmo = 17;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 private:
     void Forward(float Value);
@@ -51,6 +59,8 @@ private:
     void FireOn();
     void FireOff();
     void Reload();
+    void EquipRifle();
+    void EquipPistol();
     void Retry();
     void Think(double Now);
     void Shoot(const FVector& Aim, bool Scatter);
@@ -59,15 +69,18 @@ private:
     UFUNCTION(Server,Reliable) void ServerSprint(bool Enabled);
     UFUNCTION(Server,Reliable) void SetTrigger(bool Down);
     UFUNCTION(Server,Reliable) void ServerReload();
+    UFUNCTION(Server,Reliable) void ServerEquip(bool Pistol);
     UFUNCTION(NetMulticast,Unreliable) void ShotFX(FVector_NetQuantize From, FVector_NetQuantize To, bool Hit);
     UPROPERTY() TObjectPtr<UAnimSequence> IdlePose;
     UPROPERTY() TObjectPtr<UAnimSequence> JogPose;
     UPROPERTY() TObjectPtr<USoundBase> Report;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Gun;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> Sidearm;
     TWeakObjectPtr<AContactResponder> Target;
     FVector Destination = FVector::ZeroVector;
     int32 Slot = INDEX_NONE;
     bool bAlien = false;
+    bool bBoss = false;
     bool bTrigger = false;
     bool bJog = false;
     double NextShot = 0, NextThink = 0, ReloadAt = 0, HideUntil = 0;

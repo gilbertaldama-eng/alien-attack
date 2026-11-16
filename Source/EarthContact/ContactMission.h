@@ -82,6 +82,8 @@ private:
     int32 Slot = INDEX_NONE;
     bool bAlien = false;
     bool bBoss = false;
+    double BrainControlledUntil = 0;
+    double NextMindAttack = 0;
     bool bTrigger = false;
     bool bJog = false;
     double NextShot = 0, NextThink = 0, ReloadAt = 0, HideUntil = 0;

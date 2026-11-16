@@ -25,6 +25,61 @@
 
 namespace
 {
+
+    // Fast, native Unreal geometry for genuinely non-human silhouettes.
+    // Each primitive is decorative only; the character capsule supplies collision.
+    void BuildAlienVisual(AContactResponder* Unit, bool Nordic)
+    {
+        const UStaticMesh* Sphere=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere"));
+        const UStaticMesh* Cylinder=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder"));
+        const auto* Basic=LoadObject<UMaterialInterface>(nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+        auto Part=[&](const TCHAR* Name,const UStaticMesh* Shape,FVector Location,FVector Scale,
+                      FLinearColor Color,FRotator Rotation=FRotator::ZeroRotator)
+        {
+            auto* Mesh=NewObject<UStaticMeshComponent>(Unit,Name);
+            Mesh->SetupAttachment(Unit->GetRootComponent());
+            Mesh->SetStaticMesh(const_cast<UStaticMesh*>(Shape));
+            Mesh->SetRelativeLocationAndRotation(Location,Rotation);
+            Mesh->SetRelativeScale3D(Scale);
+            Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            Mesh->SetCastShadow(true);
+            Mesh->RegisterComponent();
+            auto* Mat=UMaterialInstanceDynamic::Create(const_cast<UMaterialInterface*>(Basic),Mesh);
+            if(Mat) { Mat->SetVectorParameterValue(TEXT("Color"),Color); Mesh->SetMaterial(0,Mat); }
+            return Mesh;
+        };
+        if(!Sphere || !Cylinder || !Basic) return;
+        const FLinearColor Skin=Nordic ? FLinearColor(.82f,.87f,.93f) : FLinearColor(.40f,.45f,.45f);
+        const FLinearColor Eye(.004f,.008f,.015f);
+        const FLinearColor Shade=Nordic ? FLinearColor(.91f,.95f,1.f) : FLinearColor(.22f,.26f,.26f);
+        // Grey: large bulbous head and dark almond eyes. Nordic: elongated pale humanoid.
+        Part(TEXT("EntityTorso"),Sphere,{0,0,91},Nordic ? FVector(.36f,.31f,.59f) : FVector(.31f,.25f,.51f),Skin);
+        Part(TEXT("EntityHips"),Sphere,{0,0,54},{.29f,.28f,.25f},Skin);
+        Part(TEXT("EntityHead"),Sphere,{0,0,145},Nordic ? FVector(.36f,.38f,.46f) : FVector(.57f,.50f,.55f),Skin);
+        for (int S : {-1,1})
+        {
+            Part(S<0 ? TEXT("EntityEyeLeft"):TEXT("EntityEyeRight"),Sphere,
+                 Nordic ? FVector(28,S*16,148) : FVector(40,S*20,147),
+                 Nordic ? FVector(.10f,.11f,.16f) : FVector(.115f,.15f,.25f),Eye,
+                 FRotator(0,S*10,S*12));
+            Part(S<0 ? TEXT("EntityArmLeft"):TEXT("EntityArmRight"),Cylinder,
+                 FVector(0,S*36,90),FVector(.12f,.12f,.64f),Skin,FRotator(S*12,0,0));
+            Part(S<0 ? TEXT("EntityHandLeft"):TEXT("EntityHandRight"),Sphere,
+                 FVector(5,S*42,49),FVector(.15f,.12f,.16f),Skin);
+            Part(S<0 ? TEXT("EntityLegLeft"):TEXT("EntityLegRight"),Cylinder,
+                 FVector(0,S*17,28),FVector(.15f,.15f,.56f),Shade,FRotator(S*4,0,0));
+            Part(S<0 ? TEXT("EntityFootLeft"):TEXT("EntityFootRight"),Sphere,
+                 FVector(12,S*18,5),FVector(.27f,.15f,.105f),Skin);
+        }
+        if (Nordic)
+        {
+            Part(TEXT("NordicSilverCrown"),Sphere,{-7,0,174},FVector(.34f,.36f,.09f),Shade);
+            Part(TEXT("NordicNose"),Sphere,{35,0,140},FVector(.10f,.085f,.20f),Skin);
+        }
+        // Hide the mannequin; gameplay collision, targeting and AI remain intact.
+        Unit->GetMesh()->SetVisibility(false,true);
+    }
+
     FVector Barricade(bool Alien, int32 Slot)
     {
         return FVector((Alien ? 1 : -1) * (600 + (Slot / 6) * 670), (Slot % 6 - 2.5) * 490, 0);
@@ -105,10 +160,12 @@ AContactResponder::AContactResponder()
     Gun->SetupAttachment(GetMesh(), TEXT("hand_r"));
     Gun->SetAbsolute(false,true,false);
     Gun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Gun->SetRelativeScale3D(FVector(1.18f)); // make the existing rifle more readable
     Sidearm = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SidearmProxy"));
     Sidearm->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube")));
     Sidearm->SetupAttachment(GetMesh(),TEXT("hand_r"));
-    Sidearm->SetRelativeScale3D(FVector(.05f,.19f,.075f));
+    Sidearm->SetRelativeLocation(FVector(8,18,-5));
+    Sidearm->SetRelativeScale3D(FVector(.09f,.27f,.13f));
     Sidearm->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Sidearm->SetVisibility(false);
     auto* Boom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -136,7 +193,8 @@ void AContactResponder::AssignPost(bool Alien, int32 Index)
     {
         GetMesh()->SetSkeletalMesh(LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple")));
         GetMesh()->SetRelativeScale3D({1.18,.8f,1.08});
-        FitRaiderCarapace(this);
+        if (GetWorld()->GetGameState<AContactState>() && !GetWorld()->GetGameState<AContactState>()->bHunt)
+            FitRaiderCarapace(this); // Keep the original relay-battle creatures unchanged.
     }
     for (int32 i=0; i<GetMesh()->GetNumMaterials(); ++i)
         if (auto* Mat = GetMesh()->CreateDynamicMaterialInstance(i))
@@ -157,11 +215,13 @@ void AContactResponder::AssignHunter(int32 Index)
 {
     AssignPost(true,Index);
     Health=HunterHP;
-    const float HeightCm=30.48f;
+    const float HeightCm=91.44f; // three feet
     const float Scale=HeightCm/(2*GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
     SetActorScale3D(FVector(Scale));
     GetMesh()->SetRelativeScale3D(FVector(.96f));
+    BuildAlienVisual(this,false);
     Gun->SetVisibility(false);
+    Sidearm->SetVisibility(false);
     GetCharacterMovement()->MaxWalkSpeed=195;
     GetCharacterMovement()->MaxStepHeight=12;
     UE_LOG(LogTemp,Display,TEXT("HUNT hunter=%d hp=%d capsule_cm=%.2f"),Index,Health,2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
@@ -176,6 +236,7 @@ void AContactResponder::AssignNordicBoss()
     const float Scale=HeightCm/(2*GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
     SetActorScale3D(FVector(Scale));
     GetMesh()->SetRelativeScale3D(FVector(.94f,.83f,1.02f));
+    BuildAlienVisual(this,true);
     for (int32 I=0; I<GetMesh()->GetNumMaterials(); ++I)
         if (auto* Mat=GetMesh()->CreateDynamicMaterialInstance(I))
             Mat->SetVectorParameterValue(TEXT("Tint"),FLinearColor(.93f,.96f,1.f));
@@ -533,11 +594,16 @@ void AContactMode::Tick(float Delta)
     if (!Player->Health) State->Result=EContactResult::Lost;
     else if (State->bHunt && Raiders==0 && !State->bBossSpawned)
     {
-        State->bBossSpawned=true;
-        const FVector BossStart(650,500,120);
-        if (auto* Boss=GetWorld()->SpawnActor<AContactResponder>(BossStart,FRotator(0,180,0)))
+        const FVector BossStart(350,1050,140);
+        FActorSpawnParameters SpawnOptions;
+        SpawnOptions.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        if (auto* Boss=GetWorld()->SpawnActor<AContactResponder>(AContactResponder::StaticClass(),
+                 BossStart,FRotator(0,180,0),SpawnOptions))
+        {
             Boss->AssignNordicBoss();
-        else State->Result=EContactResult::Won; // avoid soft-lock if spawn fails
+            State->bBossSpawned=true;
+        }
+        else UE_LOG(LogTemp,Error,TEXT("NORDIC BOSS spawn failed; mission remains active"));
     }
     else if (State->bHunt ? State->bBossDefeated : (Raiders==0 || State->Uplink>=10))
         State->Result=EContactResult::Won;

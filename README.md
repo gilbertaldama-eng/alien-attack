@@ -46,3 +46,7 @@ This milestone targets standalone single-player in the Development build. Packag
 ## Dual-weapon / Nordic-boss prototype verification (pending)
 
 The feature is staged on a review branch. It has **not** yet been compiled or playtested in Unreal after these changes. Build `EarthContactEditor` using the commands above, then verify: keys 1/2 swap visible weapons, magazines retain ammo across swaps, pistol requires fresh trigger presses, reloads complete independently, five miniature hunters can be defeated, the tall boss spawns once, defeating it wins, losing and restarting works, and Relay mode still works. Check mannequin proportions, white material tint, camera clipping, spawn collision and sound before calling the boss presentation complete. 
+
+## Experimental teleport presentation
+
+On the feature branch, the Nordic boss arrival hides the character for 0.23 seconds while a temporary pale-blue/white point light flashes at the spawn location; after the flash the boss becomes visible. Defeated aliens flash and vanish rather than leaving corpses. This is a **programmatic lighting prototype**, not a finished cinematic Niagara effect, screen bloom, particle burst, audio cue or custom animation. The renderer configuration currently disables bloom, so review the in-game visibility of the effect. Verify in UE 5.8 before merging; the repository was updated without a local engine build.

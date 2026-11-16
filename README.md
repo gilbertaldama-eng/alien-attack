@@ -50,3 +50,11 @@ The feature is staged on a review branch. It has **not** yet been compiled or pl
 ## Experimental teleport presentation
 
 On the feature branch, the Nordic boss arrival hides the character for 0.23 seconds while a temporary pale-blue/white point light flashes at the spawn location; after the flash the boss becomes visible. Defeated aliens flash and vanish rather than leaving corpses. This is a **programmatic lighting prototype**, not a finished cinematic Niagara effect, screen bloom, particle burst, audio cue or custom animation. The renderer configuration currently disables bloom, so review the in-game visibility of the effect. Verify in UE 5.8 before merging; the repository was updated without a local engine build.
+
+## Alien invasion visual / psychic prototype — not yet engine-tested
+
+- The desert scene now stages **three procedural silhouettes**: a hovering black jellyfish UFO with hanging strands, a chrome broom-riding witch, and a partially buried crashed disk. They use existing Unreal basic meshes, not final authored/rigged production models. The original relay-station geometry is retained so the alternate Relay mission still has cover.
+- The Nordic boss projects a line-of-sight mind-control attack while nearby: player walk speed is reduced for 1.65 seconds, with a 5.25-second attack interval. Player hits briefly interrupt the boss for 0.33 seconds. Hand-pointing/temple gestures, screen distortion and boss voice are **not** yet animated/implemented.
+- Open issues: cinematic arrival, aerial low-gravity battle, Men-in-Black 1.4-second memory-wipe encounter, combo XP/headshot scoring, plasma sidekick and getaway, finished character models and audio.
+- **Music:** a YouTube watch URL is not a distributable audio asset or a license. Do not rip or embed third-party music without permission; use cleared music stems to implement adaptive playback up to 1.6x rate.
+- **Verification:** The GitHub-only changes have not been compiled or playtested in Unreal Engine 5.8. Test walk-speed recovery, mind-control line of sight and shooting interruption, nighttime/sky readability, Unreal asset loading and both Solo Hunt/Relay modes before merging.

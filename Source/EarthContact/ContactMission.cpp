@@ -19,6 +19,9 @@
 #include "Camera/PlayerCameraManager.h"
 #include "DrawDebugHelpers.h"
 #include "ProceduralMeshComponent.h"
+#include "Engine/PointLight.h"
+#include "Components/PointLightComponent.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -179,8 +182,42 @@ void AContactResponder::AssignNordicBoss()
     Gun->SetVisibility(false);
     Sidearm->SetVisibility(false);
     GetCharacterMovement()->MaxWalkSpeed=300;
+    TeleportFlash(true);
     UE_LOG(LogTemp,Display,TEXT("NORDIC BOSS spawned hp=%d height_cm=%.2f"),Health,
         2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+}
+
+// Spawn a temporary world-space light independently of the actor so it remains
+// visible while the actor itself is hidden. No Niagara assets are required.
+void AContactResponder::TeleportFlash(bool bArrival)
+{
+    if (!HasAuthority() || !GetWorld()) return;
+    const FVector Origin=GetActorLocation()+FVector(0,0,bBoss ? 120.f : 30.f);
+    if (auto* Flash=GetWorld()->SpawnActor<APointLight>(Origin,FRotator::ZeroRotator))
+    {
+        if (auto* Light=Flash->GetPointLightComponent())
+        {
+            Light->SetLightColor(FLinearColor(.78f,.90f,1.0f));
+            Light->SetIntensity(bBoss ? 150000.f : 65000.f);
+            Light->SetAttenuationRadius(bBoss ? 1700.f : 750.f);
+        }
+        Flash->SetLifeSpan(.5f);
+    }
+    SetActorHiddenInGame(true);
+    if (!bArrival)
+    {
+        SetActorEnableCollision(false);
+        return; // The defeated entity remains hidden until the mission resets.
+    }
+    SetActorEnableCollision(false);
+    FTimerHandle RevealTimer;
+    GetWorld()->GetTimerManager().SetTimer(RevealTimer,
+        FTimerDelegate::CreateWeakLambda(this,[this]()
+        {
+            SetActorHiddenInGame(false);
+            SetActorEnableCollision(true);
+            UE_LOG(LogTemp,Display,TEXT("NORDIC BOSS reveal complete"));
+        }),.23f,false);
 }
 
 void AContactResponder::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -391,8 +428,13 @@ void AContactResponder::ReceiveHit(int32 Damage,AContactResponder* Shooter)
             if (auto* State=GetWorld()->GetGameState<AContactState>()) State->bBossDefeated=true;
         GetCharacterMovement()->DisableMovement();
         GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        GetMesh()->SetRelativeRotation(FRotator(0,-90,85));
-        GetMesh()->bPauseAnims=true;
+        if (bAlien)
+            TeleportFlash(false); // Flash-and-poof instead of an alien corpse.
+        else
+        {
+            GetMesh()->SetRelativeRotation(FRotator(0,-90,85));
+            GetMesh()->bPauseAnims=true;
+        }
     }
 }
 

@@ -182,6 +182,7 @@ void AContactResponder::AssignNordicBoss()
     Gun->SetVisibility(false);
     Sidearm->SetVisibility(false);
     GetCharacterMovement()->MaxWalkSpeed=300;
+    NextMindAttack=GetWorld()->GetTimeSeconds()+3.0;
     TeleportFlash(true);
     UE_LOG(LogTemp,Display,TEXT("NORDIC BOSS spawned hp=%d height_cm=%.2f"),Health,
         2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
@@ -329,6 +330,8 @@ void AContactResponder::Tick(float Delta)
     Super::Tick(Delta);
     if (!Health || !Active(GetWorld())) return;
     const bool Moving = GetVelocity().Size2D()>35;
+    if (!IsTrooper() && HasAuthority() && !bBoss)
+        GetCharacterMovement()->MaxWalkSpeed = (GetWorld()->GetTimeSeconds()<BrainControlledUntil) ? 150.f : 440.f;
     if (Moving != bJog) Animate(Moving);
     // The template rifle's barrel runs along local +Y. Keep its grip on the
     // animated palm while the muzzle follows the view or squad target.
@@ -356,7 +359,25 @@ void AContactResponder::Tick(float Delta)
         if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
         if (GetWorld()->GetGameState<AContactState>()->bHunt)
         {
-            if (Enemy && Enemy->Health && Now>=NextShot && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<(bBoss ? 170 : 80)
+            // Boss projects a telepathic suppression field with visible line of sight.
+            // Any damage briefly disrupts the channel; the player can use this to escape.
+            if (bBoss && Enemy && Enemy->Health && Now >= NextMindAttack && Now >= HideUntil &&
+                FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation()) < 1650)
+            {
+                FHitResult MentalSight;
+                FCollisionQueryParams SightParams(SCENE_QUERY_STAT(NordicMindSight),false,this);
+                GetWorld()->LineTraceSingleByChannel(MentalSight,
+                    GetActorLocation()+FVector(0,0,125),
+                    Enemy->GetActorLocation()+FVector(0,0,55),ECC_Visibility,SightParams);
+                if (MentalSight.GetActor()==Enemy)
+                {
+                    Enemy->BrainControlledUntil=Now+1.65;
+                    NextMindAttack=Now+5.25;
+                    UE_LOG(LogTemp,Display,TEXT("NORDIC mind-control applied duration=1.65"));
+                }
+                else NextMindAttack=Now+1.0;
+            }
+            if (Enemy && Enemy->Health && Now>=NextShot && Now>=HideUntil && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<(bBoss ? 170 : 80)
                 && FMath::Abs(GetActorLocation().Z-Enemy->GetActorLocation().Z)<115)
             {
                 FHitResult Contact;
@@ -421,6 +442,11 @@ void AContactResponder::ReceiveHit(int32 Damage,AContactResponder* Shooter)
     if (!HasAuthority() || !Health || Shooter->bAlien==bAlien) return;
     Health=FMath::Max(0,Health-Damage);
     if (IsTrooper()) HideUntil=GetWorld()->GetTimeSeconds()+FMath::FRandRange(.65f,1.5);
+    if (bBoss && Shooter && !Shooter->IsTrooper())
+    {
+        HideUntil=GetWorld()->GetTimeSeconds()+.33; // short interrupt, not permanent stun
+        NextMindAttack=FMath::Max(NextMindAttack,HideUntil+.3);
+    }
     UE_LOG(LogTemp,Display,TEXT("BATTLE hit %s[%d] -> %s[%d] hp=%d"),Shooter->bAlien?TEXT("alien"):TEXT("unit"),Shooter->Slot,bAlien?TEXT("alien"):TEXT("unit"),Slot,Health);
     if (!Health)
     {

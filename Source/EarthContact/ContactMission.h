@@ -40,7 +40,7 @@ public:
     void AssignHunter(int32 Index);
     void AssignNordicBoss();
     void TeleportFlash(bool bArrival);
-    static constexpr int32 HunterHP = 90;
+    static constexpr int32 HunterHP = 90; // 3-foot greys
     static constexpr int32 BossHP = 550;
     bool IsBoss() const { return bBoss; }
     bool IsAlien() const { return bAlien; }

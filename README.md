@@ -58,3 +58,9 @@ On the feature branch, the Nordic boss arrival hides the character for 0.23 seco
 - Open issues: cinematic arrival, aerial low-gravity battle, Men-in-Black 1.4-second memory-wipe encounter, combo XP/headshot scoring, plasma sidekick and getaway, finished character models and audio.
 - **Music:** a YouTube watch URL is not a distributable audio asset or a license. Do not rip or embed third-party music without permission; use cleared music stems to implement adaptive playback up to 1.6x rate.
 - **Verification:** The GitHub-only changes have not been compiled or playtested in Unreal Engine 5.8. Test walk-speed recovery, mind-control line of sight and shooting interruption, nighttime/sky readability, Unreal asset loading and both Solo Hunt/Relay modes before merging.
+
+## Corrective character pass (unverified in Unreal)
+
+- Miniature Solo Hunt enemies are now 91.44 cm (3 feet), with dynamically constructed grey alien silhouettes: large oblong heads, black eyes, slender limbs, and no visible mannequin body. The Nordic boss similarly uses a tall pale humanoid procedural form rather than the Quinn mannequin. These are intermediate engine-built models, **not rigged high-resolution assets**; fine sculpting, facial animation and texturing remain to be done.
+- The old 'win on boss spawn failure' branch was removed. Boss spawn forces spawning to avoid placement rejection; a failure remains logged and the mission stays active rather than falsely declaring victory. Confirm full boss AI and victory behavior in a new standalone playtest.
+- Rifle mesh scale increased for readability; the pistol is still a primitive prop pending a proper imported asset.

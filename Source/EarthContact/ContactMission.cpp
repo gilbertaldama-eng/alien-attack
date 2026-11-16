@@ -77,7 +77,7 @@ namespace
             Part(TEXT("NordicNose"),Sphere,{35,0,140},FVector(.10f,.085f,.20f),Skin);
         }
         // Hide the mannequin; gameplay collision, targeting and AI remain intact.
-        Unit->GetMesh()->SetVisibility(false,true);
+        Unit->GetMesh()->SetVisibility(false,false); // Keep attached weapon visibility independent.
     }
 
     FVector Barricade(bool Alien, int32 Slot)

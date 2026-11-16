@@ -144,6 +144,39 @@ void AContactField::BeginPlay()
     Dish->SetMaterial(0,Concrete->GetMaterial(0));
     Put(Metal,{2700,520,1015},{.11f,.11f,4.8},FRotator(0,0,-29));
     Put(Mast,{2700,601,1200},{.44f,.44f,.71f});
+    // Sky silhouettes for the crash-site nightmare. These are lightweight procedural
+    // primitives until rigged, art-directed meshes and materials replace them.
+    auto* VoidMetal=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.012f,.015f,.024f},false);
+    auto* Shadow=Batch(Cube,{.008f,.011f,.018f},false);
+    auto* Chrome=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.65f,.75f,.84f},false);
+    auto* ChromeBars=Batch(Cube,{.60f,.70f,.78f},false);
+    auto* Glow=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.20f,.72f,.94f},false);
+    // Black hovering jellyfish craft, visibly distinct from the grounded wreck.
+    const FVector Jelly(-3400,1200,2300);
+    Put(VoidMetal,Jelly,{9.2f,9.2f,1.65f});
+    Put(VoidMetal,Jelly+FVector(0,0,-110),{6.f,6.f,1.7f});
+    for (int32 I=0;I<12;++I)
+    {
+        const double A=2*PI*I/12.;
+        const FVector Edge(Jelly.X+350*FMath::Cos(A),Jelly.Y+350*FMath::Sin(A),Jelly.Z-180);
+        const float Length=FMath::FRandRange(7.f,14.f);
+        Put(Shadow,Edge+FVector(0,0,-Length*50),{.18f,.18f,Length});
+        Put(Glow,Edge+FVector(0,0,-Length*92),{.23f,.23f,.45f});
+    }
+    // A chrome broom-riding witch: high-altitude silhouette and unmistakable broom.
+    const FVector Witch(2700,-1400,1700);
+    Put(Chrome,Witch+FVector(0,0,90),{.42f,.42f,.8f}); // head
+    Put(Chrome,Witch+FVector(0,0,-20),{.55f,.44f,1.3f}); // torso
+    Put(ChromeBars,Witch+FVector(105,0,-120),{4.1f,.12f,.13f}); // broom shaft
+    for (int32 J=-3;J<=3;++J)
+        Put(ChromeBars,Witch+FVector(320,J*13,-118),{1.0f,.07f,.08f},FRotator(0,J*7,0));
+    Put(Chrome,Witch+FVector(0,0,145),{1.2f,1.2f,.11f}); // wide-brim silhouette
+    // A crashed circular craft in the outer desert, partly buried in sand.
+    const FVector Wreck(3600,-2600,110);
+    Put(Metal,Wreck,{5.2f,5.2f,.35f},FRotator(0,19,14));
+    Put(Chrome,Wreck+FVector(0,0,75),{3.4f,3.4f,.7f});
+    Put(Glow,Wreck+FVector(130,0,-55),{.6f,.6f,.18f});
+
     FRandomStream Random(915);
     const double RockSize=Rocks->GetStaticMesh() ? FMath::Max(1.,Rocks->GetStaticMesh()->GetBounds().BoxExtent.GetMax()) : 100.;
     for(int i=0;i<340;++i)

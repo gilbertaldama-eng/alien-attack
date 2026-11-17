@@ -31,6 +31,24 @@ namespace
     // Each primitive is decorative only; the character capsule supplies collision.
     void BuildAlienVisual(AContactResponder* Unit, bool Nordic)
     {
+        // Prefer the imported CC0 rigged Grey in the game content folder.
+        // The procedural fallback remains only when the real asset is absent.
+        if (!Nordic)
+        {
+            USkeletalMesh* Grey=LoadObject<USkeletalMesh>(nullptr,
+                TEXT("/Game/Characters/Greys/SK_GreyAlien.SK_GreyAlien"));
+            if (Grey)
+            {
+                Unit->GetMesh()->SetSkeletalMesh(Grey);
+                Unit->GetMesh()->SetRelativeLocation(FVector(0,0,-88));
+                Unit->GetMesh()->SetRelativeRotation(FRotator(0,-90,0));
+                Unit->GetMesh()->SetRelativeScale3D(FVector(1.3f)); // 140cm source to 91cm actor
+                Unit->GetMesh()->SetVisibility(true,true);
+                UE_LOG(LogTemp,Display,TEXT("GREY ASSET real skeletal mesh loaded"));
+                return;
+            }
+            UE_LOG(LogTemp,Warning,TEXT("GREY ASSET not imported; showing procedural fallback"));
+        }
         const UStaticMesh* Sphere=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere"));
         const UStaticMesh* Cylinder=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder"));
         const auto* Basic=LoadObject<UMaterialInterface>(nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
@@ -209,7 +227,8 @@ void AContactResponder::AssignPost(bool Alien, int32 Index)
 void AContactResponder::Animate(bool Moving)
 {
     bJog = Moving;
-    GetMesh()->PlayAnimation(Moving ? JogPose : IdlePose,true);
+    if (UAnimSequence* Clip=(Moving && JogPose) ? JogPose.Get() : IdlePose.Get())
+        GetMesh()->PlayAnimation(Clip,true);
 }
 
 void AContactResponder::AssignHunter(int32 Index)
@@ -221,6 +240,14 @@ void AContactResponder::AssignHunter(int32 Index)
     SetActorScale3D(FVector(Scale));
     GetMesh()->SetRelativeScale3D(FVector(.96f));
     BuildAlienVisual(this,false);
+    // Only play animation clips authored for the imported Grey skeleton.
+    if (GetMesh()->GetSkeletalMeshAsset() &&
+        GetMesh()->GetSkeletalMeshAsset()->GetPathName().Contains(TEXT("/Characters/Greys/")))
+    {
+        IdlePose=LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Greys/AS_GreyIdle.AS_GreyIdle"));
+        JogPose=LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Greys/AS_GreyWalk.AS_GreyWalk"));
+        if (!IdlePose) JogPose=nullptr; // don't play mannequin clips against Grey skeleton
+    }
     Gun->SetVisibility(false);
     Sidearm->SetVisibility(false);
     GetCharacterMovement()->MaxWalkSpeed=195;

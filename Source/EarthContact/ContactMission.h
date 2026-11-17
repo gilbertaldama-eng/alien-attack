@@ -24,6 +24,8 @@ public:
     bool bHunt = false;
     bool bBossSpawned = false;
     bool bBossDefeated = false;
+    // Solo mode: 0=inside home, 1=crash, 2=dog pursuit, 3=Grey sighting, 4=active hunt.
+    int32 IntroStage = 4;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
 
@@ -109,6 +111,12 @@ public:
     AActor* ChoosePlayerStart_Implementation(AController* Player) override;
     void RestartPlayer(AController* NewPlayer) override;
     void Tick(float Delta) override;
+private:
+    double IntroStageStarted = 0;
+    UPROPERTY() TObjectPtr<AActor> StoryDog;
+    FVector StoryDogDestination = FVector(3200,-2550,120);
+    void SetIntroStage(int32 NewStage);
+    void SpawnStoryGreys();
 };
 
 UCLASS()

@@ -176,6 +176,25 @@ void AContactField::BeginPlay()
     Put(Metal,Wreck,{5.2f,5.2f,.35f},FRotator(0,19,14));
     Put(Chrome,Wreck+FVector(0,0,75),{3.4f,3.4f,.7f});
     Put(Glow,Wreck+FVector(130,0,-55),{.6f,.6f,.18f});
+    // Desert homestead: playable prologue begins inside a modest, roofed cabin.
+    // East side has an open doorway, so the player can step out toward the crash.
+    const FVector Home(-2200,-1600,0);
+    auto* HouseWall=Batch(Cube,{.31f,.24f,.18f},true);
+    auto* HouseRoof=Batch(Cube,{.18f,.14f,.12f},true);
+    auto* HouseFloor=Batch(Cube,{.20f,.16f,.11f},true);
+    auto* Porch=Batch(Cube,{.29f,.24f,.20f},true);
+    Put(HouseFloor,Home+FVector(0,0,8),{6.6f,5.4f,.16f});
+    Put(HouseWall,Home+FVector(-325,0,160),{.22f,5.4f,3.2f});
+    Put(HouseWall,Home+FVector(0,-260,160),{6.6f,.20f,3.2f});
+    Put(HouseWall,Home+FVector(0,260,160),{6.6f,.20f,3.2f});
+    // Front wall split around a wide central door for reliable player clearance.
+    for (int S : {-1,1}) Put(HouseWall,Home+FVector(325,S*190,160),{.22f,1.6f,3.2f});
+    Put(HouseWall,Home+FVector(325,0,290),{.22f,2.3f,.6f});
+    Put(HouseRoof,Home+FVector(0,0,340),{7.0f,5.9f,.25f});
+    Put(Porch,Home+FVector(430,0,12),{2.0f,4.5f,.24f});
+    Put(Concrete,Home+FVector(-140,125,67),{1.6f,.7f,1.2f}); // kitchen counter
+    Put(Metal,Home+FVector(-130,-130,45),{1.5f,1.2f,.5f}); // old couch
+    Put(Glass,Home+FVector(-320,-155,180),{.05f,1.1f,.85f}); // rear window
 
     FRandomStream Random(915);
     const double RockSize=Rocks->GetStaticMesh() ? FMath::Max(1.,Rocks->GetStaticMesh()->GetBounds().BoxExtent.GetMax()) : 100.;

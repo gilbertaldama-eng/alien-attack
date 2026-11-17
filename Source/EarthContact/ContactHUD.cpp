@@ -14,8 +14,14 @@ void AContactHUD::DrawHUD()
     DrawRect(Ink,20,20,340,94);
     DrawRect(Gold,20,20,4,94);
     DrawText(TEXT("ROSWELL    /    SIGNAL STATION"),Gold,37,29);
-    DrawText(State->bHunt ? (State->bBossSpawned ? TEXT("NORDIC ENTITY  /  EIGHT-FOOT BOSS") : TEXT("Solo hunt  /  Clear the five small entities")) : TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
-    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
+    const TCHAR* IntroPrompt=State->IntroStage==0 ? TEXT("HOME  /  SOMETHING IS WRONG OUTSIDE") :
+        State->IntroStage==1 ? TEXT("A LIGHT FELL FROM THE SKY") :
+        State->IntroStage==2 ? TEXT("YOUR DOG IS RUNNING TOWARD THE CRASH") :
+        State->IntroStage==3 ? TEXT("THOSE ARE NOT PEOPLE  /  FOLLOW THE DOG") : nullptr;
+    DrawText(State->bHunt ? (IntroPrompt ? IntroPrompt :
+        (State->bBossSpawned ? TEXT("NORDIC ENTITY  /  EIGHT-FOOT BOSS") : TEXT("THE GREYS  /  SURVIVE THE ENCOUNTER"))) :
+        TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
+    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->IntroStage<4 ? TEXT("PROLOGUE") : State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
     DrawRect(Ink,20,H-86,258,66);
     DrawText(FString::Printf(TEXT("HP  %03d"),Player->Health),Ally,36,H-78,nullptr,1.45);
     DrawText(Player->bReloading ? TEXT("RELOADING") : FString::Printf(TEXT("%s  %02d / %d"),Player->bPistol ? TEXT("PISTOL") : TEXT("RIFLE"),Player->Ammo,Player->bPistol ? 17 : 30),Gold,130,H-77);

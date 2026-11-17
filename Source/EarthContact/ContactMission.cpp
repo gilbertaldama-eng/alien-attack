@@ -412,6 +412,8 @@ void AContactResponder::Tick(float Delta)
     }
     if (IsTrooper())
     {
+        if (GetWorld()->GetGameState<AContactState>()->bHunt &&
+            GetWorld()->GetGameState<AContactState>()->IntroStage < 4) return;
         if (Now >= NextThink) { Think(Now); NextThink=Now+FMath::FRandRange(.18f,.28f); }
         FVector Direction = Destination - GetActorLocation();
         if (Direction.Size2D()>35) AddMovementInput(Direction.GetSafeNormal2D(),1,true);
@@ -536,7 +538,7 @@ void AContactMode::InitGame(const FString& Map,const FString& Options,FString& E
 {
     Super::InitGame(Map,Options,Error);
     GetWorld()->SpawnActor<AContactField>();
-    auto* Start=GetWorld()->SpawnActor<APlayerStart>(FVector(-2200,-520,100),FRotator(0,13,0));
+    auto* Start=GetWorld()->SpawnActor<APlayerStart>(FVector(-2190,-1570,100),FRotator(0,15,0));
     if (Start) Start->PlayerStartTag=TEXT("AlliedDeployment");
 }
 AActor* AContactMode::ChoosePlayerStart_Implementation(AController* Player)
@@ -559,13 +561,35 @@ void AContactMode::StartPlay()
     if (State->bHunt)
     {
         State->Allies=0;
-        State->Raiders=5;
-        for(int32 Index=0;Index<5;++Index)
+        State->Raiders=0;
+        State->IntroStage=0;
+        IntroStageStarted=GetWorld()->GetTimeSeconds();
+        // Temporary in-engine dog silhouette: a production quadruped model/rig is still needed.
+        StoryDog=GetWorld()->SpawnActor<AActor>(AActor::StaticClass(),FVector(-1630,-1650,75),FRotator::ZeroRotator);
+        if (StoryDog)
         {
-            const FVector Start(-1640+Index*30,-780+Index*150,100);
-            auto* Hunter=GetWorld()->SpawnActor<AContactResponder>(Start,FRotator(0,180,0));
-            if (ensure(Hunter)) Hunter->AssignHunter(Index);
+            auto AddPart=[&](const TCHAR* Name,FVector Offset,FVector Scale)
+            {
+                auto* Mesh=NewObject<UStaticMeshComponent>(StoryDog,Name);
+                Mesh->SetupAttachment(StoryDog->GetRootComponent());
+                Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere")));
+                Mesh->SetRelativeLocation(Offset);
+                Mesh->SetRelativeScale3D(Scale);
+                Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                Mesh->RegisterComponent();
+            };
+            AddPart(TEXT("DogBody"),FVector(0,0,30),FVector(.5f,.21f,.23f));
+            AddPart(TEXT("DogHead"),FVector(38,0,44),FVector(.22f,.20f,.19f));
+            AddPart(TEXT("DogSnout"),FVector(57,0,39),FVector(.17f,.11f,.10f));
+            for (int S : {-1,1})
+            {
+                AddPart(S<0?TEXT("DogFrontL"):TEXT("DogFrontR"),FVector(24,S*13,14),FVector(.08f,.08f,.25f));
+                AddPart(S<0?TEXT("DogBackL"):TEXT("DogBackR"),FVector(-24,S*13,14),FVector(.08f,.08f,.25f));
+                AddPart(S<0?TEXT("DogEarL"):TEXT("DogEarR"),FVector(35,S*15,60),FVector(.1f,.07f,.16f));
+            }
+            AddPart(TEXT("DogTail"),FVector(-54,0,48),FVector(.25f,.06f,.06f));
         }
+        UE_LOG(LogTemp,Display,TEXT("INTRO home staged; dog=%s"),StoryDog?TEXT("spawned"):TEXT("missing"));
         return;
     }
     for(int32 Side=0; Side<2; ++Side)
@@ -577,6 +601,51 @@ void AContactMode::StartPlay()
             if (ensure(Unit)) Unit->AssignPost(Side!=0,Slot);
         }
 }
+void AContactMode::SetIntroStage(int32 NewStage)
+{
+    if (auto* State=GetGameState<AContactState>())
+    {
+        State->IntroStage=NewStage;
+        IntroStageStarted=GetWorld()->GetTimeSeconds();
+        UE_LOG(LogTemp,Display,TEXT("INTRO stage=%d"),NewStage);
+        if (NewStage==1)
+        {
+            // Distant cold-white crash flash. Audio and Niagara remain asset tasks.
+            if (auto* Flash=GetWorld()->SpawnActor<APointLight>(FVector(3600,-2600,650),FRotator::ZeroRotator))
+            {
+                if (auto* Light=Flash->PointLightComponent.Get())
+                {
+                    Light->SetIntensity(600000.f);
+                    Light->SetAttenuationRadius(6500.f);
+                    Light->SetLightColor(FLinearColor(.64f,.84f,1.f));
+                }
+                Flash->SetLifeSpan(1.8f);
+            }
+        }
+    }
+}
+
+void AContactMode::SpawnStoryGreys()
+{
+    auto* State=GetGameState<AContactState>();
+    if (!State || !State->bHunt) return;
+    int32 Spawned=0;
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    for (int32 Index=0; Index<5; ++Index)
+    {
+        const FVector Start(1800+Index*140,-2050+Index*155,110);
+        if (auto* Hunter=GetWorld()->SpawnActor<AContactResponder>(AContactResponder::StaticClass(),
+            Start,FRotator(0,180,0),Params))
+        {
+            Hunter->AssignHunter(Index);
+            ++Spawned;
+        }
+    }
+    State->Raiders=Spawned;
+    UE_LOG(LogTemp,Display,TEXT("INTRO grey sighting; spawned=%d"),Spawned);
+}
+
 void AContactMode::Tick(float Delta)
 {
     Super::Tick(Delta);
@@ -584,6 +653,38 @@ void AContactMode::Tick(float Delta)
     if (!State || State->Result!=EContactResult::Active) return;
     auto* Player=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
     if (!Player) return;
+    if (State->bHunt && State->IntroStage<4 && State->Result==EContactResult::Active)
+    {
+        const double Since=GetWorld()->GetTimeSeconds()-IntroStageStarted;
+        const FVector Crash(3600,-2600,100);
+        if (State->IntroStage==0 && Since>=6.0) SetIntroStage(1);
+        else if (State->IntroStage==1 && Since>=3.5) SetIntroStage(2);
+        else if (State->IntroStage==2)
+        {
+            if (StoryDog)
+            {
+                const FVector Current=StoryDog->GetActorLocation();
+                FVector Target=StoryDogDestination;
+                Target.Z=90;
+                const FVector Step=(Target-Current).GetSafeNormal2D()*Delta*520;
+                if (FVector::Dist2D(Current,Target)>Step.Size())
+                {
+                    StoryDog->SetActorLocation(Current+Step);
+                    StoryDog->SetActorRotation(Step.Rotation());
+                }
+            }
+            if (FVector::Dist2D(Player->GetActorLocation(),Crash)<4400 || Since>36)
+            {
+                SpawnStoryGreys();
+                SetIntroStage(3);
+            }
+        }
+        else if (State->IntroStage==3)
+        {
+            if (FVector::Dist2D(Player->GetActorLocation(),Crash)<2100)
+                SetIntroStage(4);
+        }
+    }
     int32 Allies=0,Raiders=0;
     for (TActorIterator<AContactResponder> It(GetWorld()); It; ++It)
         if (It->IsTrooper() && It->Health>0) { if(It->IsAlien()) ++Raiders; else ++Allies; }
@@ -592,7 +693,7 @@ void AContactMode::Tick(float Delta)
     if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
-    else if (State->bHunt && Raiders==0 && !State->bBossSpawned)
+    else if (State->bHunt && State->IntroStage==4 && Raiders==0 && !State->bBossSpawned)
     {
         const FVector BossStart(350,1050,140);
         FActorSpawnParameters SpawnOptions;
@@ -605,7 +706,7 @@ void AContactMode::Tick(float Delta)
         }
         else UE_LOG(LogTemp,Error,TEXT("NORDIC BOSS spawn failed; mission remains active"));
     }
-    else if (State->bHunt ? State->bBossDefeated : (Raiders==0 || State->Uplink>=10))
+    else if (State->bHunt ? (State->IntroStage==4 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
         State->Result=EContactResult::Won;
     if (State->Result!=EContactResult::Active)
         UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);

@@ -4,6 +4,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
@@ -413,7 +414,22 @@ void AContactResponder::Tick(float Delta)
     if (IsTrooper())
     {
         if (GetWorld()->GetGameState<AContactState>()->bHunt &&
-            GetWorld()->GetGameState<AContactState>()->IntroStage < 4) return;
+            GetWorld()->GetGameState<AContactState>()->IntroStage < 4)
+        {
+            if (GetWorld()->GetGameState<AContactState>()->IntroStage==3)
+            {
+                // Uncanny pursuit tableau: greys converge on the same crash corridor as the dog.
+                // A properly animated skeletal chase is a later asset/AI milestone.
+                const FVector Pursuit(3250,-2550,100);
+                const FVector Delta=Pursuit-GetActorLocation();
+                if (Delta.Size2D()>180)
+                {
+                    AddMovementInput(Delta.GetSafeNormal2D(),1.f,true);
+                    SetActorRotation(FRotator(0,Delta.Rotation().Yaw,0));
+                }
+            }
+            return;
+        }
         if (Now >= NextThink) { Think(Now); NextThink=Now+FMath::FRandRange(.18f,.28f); }
         FVector Direction = Destination - GetActorLocation();
         if (Direction.Size2D()>35) AddMovementInput(Direction.GetSafeNormal2D(),1,true);
@@ -568,6 +584,9 @@ void AContactMode::StartPlay()
         StoryDog=GetWorld()->SpawnActor<AActor>(AActor::StaticClass(),FVector(-1630,-1650,75),FRotator::ZeroRotator);
         if (StoryDog)
         {
+            auto* DogRoot=NewObject<USceneComponent>(StoryDog,TEXT("StoryDogRoot"));
+            StoryDog->SetRootComponent(DogRoot);
+            DogRoot->RegisterComponent();
             auto AddPart=[&](const TCHAR* Name,FVector Offset,FVector Scale)
             {
                 auto* Mesh=NewObject<UStaticMeshComponent>(StoryDog,Name);

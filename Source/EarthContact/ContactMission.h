@@ -84,6 +84,11 @@ private:
     int32 Slot = INDEX_NONE;
     bool bAlien = false;
     bool bBoss = false;
+    // Solo Hunt Greys: unsettling pause, lateral stalking, and a telegraphed close touch.
+    double NextGreyBeat = 0;
+    double GreyPauseUntil = 0;
+    bool bGreyReachPending = false;
+    bool bGreyFlankLeft = false;
     double BrainControlledUntil = 0;
     double NextMindAttack = 0;
     bool bTrigger = false;

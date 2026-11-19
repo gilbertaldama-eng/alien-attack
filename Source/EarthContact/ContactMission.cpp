@@ -413,6 +413,7 @@ void AContactResponder::Think(double Now)
             GreyPauseUntil=Now+(Close ? 1.15 : 1.75);
             bGreyReachPending=Close;
             NextGreyBeat=GreyPauseUntil+(Close ? 5.25 : 3.75);
+            bGreyFlankLeft=!bGreyFlankLeft;
             UE_LOG(LogTemp,Display,TEXT("GREY ENCOUNTER %d %s distance=%.0f"),
                 Slot,Close?TEXT("reach warning"):TEXT("motionless stare"),Distance);
         }
@@ -428,9 +429,6 @@ void AContactResponder::Think(double Now)
             const FVector Side(-Toward.Y,Toward.X,0);
             Destination=Target->GetActorLocation()-Toward*210.f+
                 Side*(bGreyFlankLeft ? 290.f : -290.f);
-            // Change flank direction after each stare.
-            if (Now >= NextGreyBeat-2.5 && Now < NextGreyBeat-2.2)
-                bGreyFlankLeft=!bGreyFlankLeft;
         }
         FCollisionQueryParams Query(NAME_None,false,this);
         Query.AddIgnoredActor(Target.Get());
@@ -439,7 +437,11 @@ void AContactResponder::Think(double Now)
             const FVector Step=Toward.RotateAngleAxis(Angle,FVector::UpVector)*90;
             if (!GetWorld()->SweepTestByChannel(Here,Here+Step,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(6),Query))
             {
-                Destination=Here+Step;
+                // Preserve the intentional flank target when unobstructed;
+                // short-step steering is only a fallback around obstacles.
+                if (GetWorld()->SweepTestByChannel(Here,Destination,FQuat::Identity,
+                    ECC_Visibility,FCollisionShape::MakeSphere(6),Query))
+                    Destination=Here+Step;
                 break;
             }
         }
@@ -563,7 +565,7 @@ void AContactResponder::Tick(float Delta)
                 }
                 else NextMindAttack=Now+1.0;
             }
-            if (Enemy && Enemy->Health && Now>=NextShot && Now>=HideUntil && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<(bBoss ? 170 : 80)
+            if (!bGreyPaused && Enemy && Enemy->Health && Now>=NextShot && Now>=HideUntil && FVector::Dist2D(GetActorLocation(),Enemy->GetActorLocation())<(bBoss ? 170 : 80)
                 && FMath::Abs(GetActorLocation().Z-Enemy->GetActorLocation().Z)<115)
             {
                 FHitResult Contact;

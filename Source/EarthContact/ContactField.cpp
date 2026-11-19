@@ -56,19 +56,49 @@ void AContactField::BeginPlay()
     TArray<FVector2D> UV;
     TArray<FColor> Colors;
     TArray<int32> Indices;
-    constexpr int32 Grid=111;
-    constexpr double Step=240;
-    auto Height=[](double X,double Y) {
-        // The narrow drainage line runs toward the wreck. Terrain retains a
-        // relatively flat foundation near the house so the player doesn't fall.
-        const double WashY=-1670.-.16*(X+2200.);
-        const double WashDist=FMath::Abs(Y-WashY);
-        const double Wash=-FMath::Max(0.,1.-WashDist/620.)*38.;
-        const double Home=FMath::Clamp(FVector2D(X+2200.,Y+1600.).Size()/920.,0.,1.);
-        const double Edge=FMath::Clamp((FMath::Max(FMath::Abs(X),FMath::Abs(Y))-2450)/2800,0.,1.);
-        const float Hills=FMath::PerlinNoise2D(FVector2D(X,Y)*.00029f+FVector2D(63,19));
-        const float Grain=FMath::PerlinNoise2D(FVector2D(X,Y)*.0016f);
-        return -3.+Edge*(350+1750*FMath::Abs(Hills)+105*Grain)+Wash*Home;
+    // 170 cm sampling resolves the crater edge and drainage channels without
+    // creating imported assets or editing any user-owned Content Browser meshes.
+    constexpr int32 Grid=161;
+    constexpr double Step=170.;
+    const FVector2D HouseXY(-2200.,-1600.);
+    const FVector2D CrashXY(3600.,-2600.);
+    auto Height=[bSolo,HouseXY,CrashXY](double X,double Y) -> double {
+        const FVector2D P(X,Y);
+        const double HouseDistance=FVector2D::Distance(P,HouseXY);
+        if (!bSolo)
+        {
+            // Preserve the original level's relay-station footprint and cover.
+            const double Edge=FMath::Clamp((FMath::Max(FMath::Abs(X),FMath::Abs(Y))-2450.)/2800.,0.,1.);
+            const double Hills=FMath::PerlinNoise2D(P*.00029+FVector2D(63,19));
+            const double Grain=FMath::PerlinNoise2D(P*.0016);
+            return -3.+Edge*(350.+1750.*FMath::Abs(Hills)+105.*Grain);
+        }
+        // Protect the player's home, porch and opening path from steep spikes.
+        const double HouseBlend=FMath::Clamp((HouseDistance-650.)/1200.,0.,1.);
+        const double CrashDistance=FVector2D::Distance(P,CrashXY);
+        const double CorridorX=FMath::Clamp((X-HouseXY.X)/(CrashXY.X-HouseXY.X),0.,1.);
+        const FVector2D PathCenter=FMath::Lerp(HouseXY,CrashXY,CorridorX);
+        const double PathDistance=FVector2D::Distance(P,PathCenter);
+        const double CorridorBlend=FMath::Clamp((PathDistance-400.)/1050.,0.,1.);
+        // Layered low-frequency erosion is actual ground displacement, not a
+        // color/lighting trick. Ridges surround the player's navigable valley.
+        const double RidgeNoise=FMath::Abs(FMath::PerlinNoise2D(P*.00024+FVector2D(37.,71.)));
+        const double MesaNoise=FMath::Abs(FMath::PerlinNoise2D(P*.00058+FVector2D(12.,91.)));
+        const double DetailNoise=FMath::PerlinNoise2D(P*.0021+FVector2D(4.,27.));
+        const double Outer=FMath::Clamp((FMath::Max(FMath::Abs(X),FMath::Abs(Y))-1900.)/5900.,0.,1.);
+        const double Ridges=Outer*(230.+1050.*RidgeNoise+430.*MesaNoise);
+        const double Undulations=35.*DetailNoise+70.*MesaNoise;
+        const double Valley=HouseBlend*(CorridorBlend*Ridges+Undulations*.45);
+        // A slightly meandering dry arroyo cuts toward the crash.
+        const double WashCenterY=-1670.-.16*(X+2200.)+170.*FMath::Sin(X*.00061);
+        const double WashDistance=FMath::Abs(Y-WashCenterY);
+        const double Wash=-65.*FMath::Square(FMath::Clamp(1.-WashDistance/690.,0.,1.))*HouseBlend;
+        // Real impact depression and piled-up raised ring. Keep the wreck's
+        // center traversable and avoid blocking the enemy approach.
+        const double CraterBowl=-145.*FMath::Square(FMath::Clamp(1.-CrashDistance/940.,0.,1.));
+        const double RimDistance=FMath::Abs(CrashDistance-1110.);
+        const double CraterRim=105.*FMath::Square(FMath::Clamp(1.-RimDistance/470.,0.,1.));
+        return -3.+Valley+Wash+CraterBowl+CraterRim;
     };
     for (int32 Row=0; Row<Grid; ++Row)
         for(int32 Col=0; Col<Grid; ++Col)
@@ -77,14 +107,32 @@ void AContactField::BeginPlay()
             V.Add({X,Y,Height(X,Y)});
             N.Add(FVector(Height(X-10,Y)-Height(X+10,Y),Height(X,Y-10)-Height(X,Y+10),20).GetSafeNormal());
             UV.Add({Col/4.,Row/4.});
-            const float T=.5f+.46f*FMath::PerlinNoise2D(FVector2D(X,Y)*.0012f);
-            Colors.Add(FLinearColor::LerpUsingHSV(FLinearColor(.24f,.105f,.052f),FLinearColor(.67f,.40f,.21f),T).ToFColor(true));
+            const double Gradient=FMath::Abs(Height(X+100,Y)-Height(X-100,Y))
+                                  +FMath::Abs(Height(X,Y+100)-Height(X,Y-100));
+            const float Dust=FMath::Clamp(.5f+.42f*FMath::PerlinNoise2D(FVector2D(X,Y)*.0012f),0.f,1.f);
+            const FLinearColor Sand=FLinearColor::LerpUsingHSV(
+                FLinearColor(.24f,.105f,.052f),FLinearColor(.60f,.37f,.20f),Dust);
+            const FLinearColor RockTint(.20f,.16f,.13f);
+            const float RockAmount=bSolo ? FMath::Clamp(float((Gradient-58.)/200.),0.f,.8f) : 0.f;
+            Colors.Add(FLinearColor::LerpUsingHSV(Sand,RockTint,RockAmount).ToFColor(true));
             if(Row==Grid-1 || Col==Grid-1) continue;
             const int32 I=Row*Grid+Col;
             Indices.Append({I,I+Grid,I+1,I+1,I+Grid,I+Grid+1});
         }
     Terrain->CreateMeshSection(0,V,Indices,N,UV,Colors,{},true);
-    Terrain->SetMaterial(0,LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/Field/M_ArroyoSand")));
+    UMaterialInterface* SandMaterial=LoadObject<UMaterialInterface>(
+        nullptr,TEXT("/Game/Field/M_ArroyoSand.M_ArroyoSand"));
+    if (!SandMaterial)
+    {
+        // Previously the code silently assigned a missing material to the
+        // landscape. Provide a visible engine material instead of null.
+        SandMaterial=LoadObject<UMaterialInterface>(
+            nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+        UE_LOG(LogTemp,Warning,TEXT("WORLD missing /Game/Field/M_ArroyoSand; using visible fallback material"));
+    }
+    Terrain->SetMaterial(0,SandMaterial);
+    UE_LOG(LogTemp,Display,TEXT("WORLD terrain grid=%dx%d, SoloHunt=%d, crater=3600,-2600"),
+        Grid,Grid,bSolo);
 
     auto* Paint=LoadObject<UMaterialInterface>(nullptr,TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
     auto Batch=[&](const TCHAR* Path,FLinearColor Color,bool Solid) {
@@ -288,13 +336,18 @@ void AContactField::BeginPlay()
     }
 
     FRandomStream Random(915);
-    const double RockSize=Rocks->GetStaticMesh() ? FMath::Max(1.,Rocks->GetStaticMesh()->GetBounds().BoxExtent.GetMax()) : 100.;
-    for(int i=0;i<340;++i)
+    // Never dereference the rock model when /Game/SimSandbox/Meshes/Rock
+    // is not installed. Missing rocks must not crash the entire world.
+    const UStaticMesh* RockMesh=Rocks->GetStaticMesh();
+    const double RockSize=RockMesh ? FMath::Max(1.,RockMesh->GetBounds().BoxExtent.GetMax()) : 100.;
+    if (!RockMesh)
+        UE_LOG(LogTemp,Warning,TEXT("WORLD optional Rock mesh not installed; skip scattered rocks"));
+    for(int i=0;RockMesh && i<340;++i)
     {
         const double X=Random.FRandRange(-9200,9200),Y=Random.FRandRange(-9200,9200);
         const bool Yard=!bSolo && FMath::Abs(X)<2400 && FMath::Abs(Y)<2400;
         const double S=Random.FRandRange(Yard?4:30,Yard?22:245)/RockSize;
-        const auto Bounds=Rocks->GetStaticMesh()->GetBounds();
+        const auto Bounds=RockMesh->GetBounds();
         Put(Rocks,{X,Y,Height(X,Y)-(Bounds.Origin.Z-.28f*Bounds.BoxExtent.Z)*S*.75f},
             FVector(S*1.3,S,S*.75f),FRotator(0,Random.FRandRange(0,360),0));
     }

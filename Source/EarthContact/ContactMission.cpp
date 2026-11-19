@@ -267,6 +267,10 @@ void AContactResponder::AssignHunter(int32 Index)
     Sidearm->SetVisibility(false);
     GetCharacterMovement()->MaxWalkSpeed=195;
     GetCharacterMovement()->MaxStepHeight=12;
+    NextGreyBeat=GetWorld()->GetTimeSeconds()+2.0+Index*.65;
+    GreyPauseUntil=0;
+    bGreyReachPending=false;
+    bGreyFlankLeft=(Index%2)==0;
     UE_LOG(LogTemp,Display,TEXT("HUNT hunter=%d hp=%d capsule_cm=%.2f"),Index,Health,2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 }
 
@@ -400,7 +404,34 @@ void AContactResponder::Think(double Now)
         Target=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
         if (!Target.IsValid()) return;
         const FVector Toward=(Target->GetActorLocation()-Here).GetSafeNormal2D();
+        const double Distance=FVector::Dist2D(Here,Target->GetActorLocation());
+        // Only small Greys do this. Boss retains its existing telepathic AI.
+        // The pause lets the player *notice* the creature before it acts.
+        if (!bBoss && Distance < 1150 && Now >= NextGreyBeat && Now >= GreyPauseUntil)
+        {
+            const bool Close=Distance < 170;
+            GreyPauseUntil=Now+(Close ? 1.15 : 1.75);
+            bGreyReachPending=Close;
+            NextGreyBeat=GreyPauseUntil+(Close ? 5.25 : 3.75);
+            UE_LOG(LogTemp,Display,TEXT("GREY ENCOUNTER %d %s distance=%.0f"),
+                Slot,Close?TEXT("reach warning"):TEXT("motionless stare"),Distance);
+        }
+        if (!bBoss && Now < GreyPauseUntil)
+        {
+            Destination=Here; // unnatural full stop, facing the player
+            return;
+        }
         Destination=Target->GetActorLocation();
+        // Flank around the player instead of following a straight-line zombie chase.
+        if (!bBoss && Distance > 180 && Distance < 1150)
+        {
+            const FVector Side(-Toward.Y,Toward.X,0);
+            Destination=Target->GetActorLocation()-Toward*210.f+
+                Side*(bGreyFlankLeft ? 290.f : -290.f);
+            // Change flank direction after each stare.
+            if (Now >= NextGreyBeat-2.5 && Now < NextGreyBeat-2.2)
+                bGreyFlankLeft=!bGreyFlankLeft;
+        }
         FCollisionQueryParams Query(NAME_None,false,this);
         Query.AddIgnoredActor(Target.Get());
         for (float Angle : {0.f,45.f,-45.f,85.f,-85.f,120.f,-120.f})
@@ -478,8 +509,37 @@ void AContactResponder::Tick(float Delta)
             return;
         }
         if (Now >= NextThink) { Think(Now); NextThink=Now+FMath::FRandRange(.18f,.28f); }
+        const bool bGreyPaused=GetWorld()->GetGameState<AContactState>()->bHunt &&
+            !bBoss && Now < GreyPauseUntil;
+        if (bGreyPaused)
+        {
+            GetCharacterMovement()->StopMovementImmediately();
+        }
+        // A reach is deliberately telegraphed. Contact is possible only after
+        // the stare, only if the player has remained close, and only with LOS.
+        if (!bBoss && bGreyReachPending && Now >= GreyPauseUntil)
+        {
+            bGreyReachPending=false;
+            if (Target.IsValid() && Target->Health>0 &&
+                FVector::Dist2D(GetActorLocation(),Target->GetActorLocation())<160.f)
+            {
+                FHitResult TouchSight;
+                FCollisionQueryParams Params(SCENE_QUERY_STAT(GreyTouch),false,this);
+                GetWorld()->LineTraceSingleByChannel(TouchSight,
+                    GetActorLocation()+FVector(0,0,50),
+                    Target->GetActorLocation()+FVector(0,0,55),
+                    ECC_Visibility,Params);
+                if (TouchSight.GetActor()==Target.Get())
+                {
+                    Target->BrainControlledUntil=FMath::Max(Target->BrainControlledUntil,Now+.75);
+                    Target->ReceiveHit(2,this);
+                    UE_LOG(LogTemp,Display,TEXT("GREY ENCOUNTER %d touch completed"),Slot);
+                }
+            }
+        }
         FVector Direction = Destination - GetActorLocation();
-        if (Direction.Size2D()>35) AddMovementInput(Direction.GetSafeNormal2D(),1,true);
+        if (!bGreyPaused && Direction.Size2D()>35)
+            AddMovementInput(Direction.GetSafeNormal2D(),1,true);
         auto* Enemy = Target.Get();
         FVector Facing = Enemy ? Enemy->GetActorLocation()-GetActorLocation() : Direction;
         if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
@@ -567,7 +627,16 @@ void AContactResponder::ReceiveHit(int32 Damage,AContactResponder* Shooter)
 {
     if (!HasAuthority() || !Health || Shooter->bAlien==bAlien) return;
     Health=FMath::Max(0,Health-Damage);
-    if (IsTrooper()) HideUntil=GetWorld()->GetTimeSeconds()+FMath::FRandRange(.65f,1.5);
+    if (IsTrooper())
+    {
+        HideUntil=GetWorld()->GetTimeSeconds()+FMath::FRandRange(.65f,1.5);
+        if (!bBoss)
+        {
+            GreyPauseUntil=0;  // shooting immediately breaks the uncanny stare/reach
+            bGreyReachPending=false;
+            NextGreyBeat=GetWorld()->GetTimeSeconds()+3.0;
+        }
+    }
     if (bBoss && Shooter && !Shooter->IsTrooper())
     {
         HideUntil=GetWorld()->GetTimeSeconds()+.33; // short interrupt, not permanent stun

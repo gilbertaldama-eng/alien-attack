@@ -1,4 +1,6 @@
 #include "ContactMission.h"
+#include "ContactImportedAssets.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -151,6 +153,27 @@ void AContactField::BeginPlay()
     auto* Chrome=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.65f,.75f,.84f},false);
     auto* ChromeBars=Batch(Cube,{.60f,.70f,.78f},false);
     auto* Glow=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.20f,.72f,.94f},false);
+    // The separate black jellyfish craft and chrome witch remain intentionally unchanged.
+    // User-imported intact and crashed saucers replace only their matching stand-ins.
+    auto SpawnImported=[&](UStaticMesh* Asset, FVector Where, float DesiredWidthCm, FRotator Rotation)
+    {
+        if(!Asset) return false;
+        auto* Mesh=NewObject<UStaticMeshComponent>(this);
+        Mesh->SetupAttachment(RootComponent);
+        Mesh->SetStaticMesh(Asset);
+        Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        const FVector Bounds=Asset->GetBounds().BoxExtent;
+        const float Width=FMath::Max(1.f,2.f*FMath::Max(Bounds.X,Bounds.Y));
+        Mesh->SetRelativeScale3D(FVector(DesiredWidthCm/Width));
+        Mesh->SetRelativeLocationAndRotation(Where,Rotation);
+        Mesh->RegisterComponent();
+        return true;
+    };
+    const bool bRealIntactUFO=SpawnImported(ContactAssets::IntactUFO(),
+        FVector(1800,3400,1550),1500,FRotator(0,-15,0));
+    const bool bRealCrashedUFO=SpawnImported(ContactAssets::CrashedUFO(),
+        FVector(3600,-2600,140),1300,FRotator(0,19,14));
+    UE_LOG(LogTemp,Display,TEXT("CONTACT UFOs intact=%d crashed=%d"),bRealIntactUFO,bRealCrashedUFO);
     // Black hovering jellyfish craft, visibly distinct from the grounded wreck.
     const FVector Jelly(-3400,1200,2300);
     Put(VoidMetal,Jelly,{9.2f,9.2f,1.65f});
@@ -173,9 +196,12 @@ void AContactField::BeginPlay()
     Put(Chrome,Witch+FVector(0,0,145),{1.2f,1.2f,.11f}); // wide-brim silhouette
     // A crashed circular craft in the outer desert, partly buried in sand.
     const FVector Wreck(3600,-2600,110);
-    Put(Metal,Wreck,{5.2f,5.2f,.35f},FRotator(0,19,14));
-    Put(Chrome,Wreck+FVector(0,0,75),{3.4f,3.4f,.7f});
-    Put(Glow,Wreck+FVector(130,0,-55),{.6f,.6f,.18f});
+    if (!bRealCrashedUFO)
+    {
+        Put(Metal,Wreck,{5.2f,5.2f,.35f},FRotator(0,19,14));
+        Put(Chrome,Wreck+FVector(0,0,75),{3.4f,3.4f,.7f});
+        Put(Glow,Wreck+FVector(130,0,-55),{.6f,.6f,.18f});
+    }
     // Desert homestead: playable prologue begins inside a modest, roofed cabin.
     // East side has an open doorway, so the player can step out toward the crash.
     const FVector Home(-2200,-1600,0);

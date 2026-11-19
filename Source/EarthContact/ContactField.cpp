@@ -6,6 +6,9 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/PointLightComponent.h"
+#include "GameFramework/GameModeBase.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
@@ -15,27 +18,36 @@ AContactField::AContactField()
     SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Station")));
     auto* Sun=CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("Afternoon"));
     Sun->SetupAttachment(RootComponent);
-    Sun->SetRelativeRotation(FRotator(-32,-115,0));
+    Sun->SetRelativeRotation(FRotator(-8,-115,0)); // low dusk sun, long desert shadows
     Sun->SetAtmosphereSunLight(true);
-    Sun->SetIntensity(5.f);
-    Sun->SetLightColor(FLinearColor(1,.86f,.68f));
+    Sun->SetIntensity(2.0f);
+    Sun->SetLightColor(FLinearColor(1.f,.61f,.38f));
     auto* Sky=CreateDefaultSubobject<USkyAtmosphereComponent>(TEXT("Atmosphere"));
     Sky->SetupAttachment(RootComponent);
     Sky->SetRelativeLocation(FVector(0,0,-150));
     auto* Fill=CreateDefaultSubobject<USkyLightComponent>(TEXT("Skylight"));
     Fill->SetupAttachment(RootComponent);
-    Fill->SetIntensity(1.1f);
+    Fill->SetIntensity(.48f);
     Fill->SetRealTimeCaptureEnabled(true);
     auto* Haze=CreateDefaultSubobject<UExponentialHeightFogComponent>(TEXT("DustHaze"));
     Haze->SetupAttachment(RootComponent);
-    Haze->SetFogDensity(.012f);
-    Haze->SetFogInscatteringColor(FLinearColor(.58f,.60f,.63f));
+    Haze->SetFogDensity(.019f);
+    Haze->SetFogHeightFalloff(.17f);
+    Haze->SetVolumetricFog(true);
+    Haze->SetFogInscatteringColor(FLinearColor(.21f,.27f,.34f));
 }
 
 void AContactField::BeginPlay()
 {
     Super::BeginPlay();
-    // A graded central yard gives way to eroded ridgelines outside the station.
+    // Standalone Solo Hunt is a lonely desert homestead, NOT a relay shooting range.
+    // The old station and barricades survive in the explicit Relay Battle mode.
+    AGameModeBase* Mode=GetWorld()->GetAuthGameMode();
+    const bool bSolo=GetNetMode()==NM_Standalone &&
+        (!Mode || !UGameplayStatics::ParseOption(Mode->OptionsString,TEXT("Mission"))
+                 .Equals(TEXT("Relay"),ESearchCase::IgnoreCase));
+    UE_LOG(LogTemp,Display,TEXT("WORLD atmosphere=%s"),bSolo?TEXT("Desert Encounter"):TEXT("Relay Battle"));
+    // Natural desert ridges with a shallow eroded wash and a subdued traversal corridor.
     auto* Terrain=NewObject<UProceduralMeshComponent>(this);
     Terrain->SetupAttachment(RootComponent);
     Terrain->SetCollisionProfileName(TEXT("BlockAll"));
@@ -47,10 +59,16 @@ void AContactField::BeginPlay()
     constexpr int32 Grid=111;
     constexpr double Step=240;
     auto Height=[](double X,double Y) {
+        // The narrow drainage line runs toward the wreck. Terrain retains a
+        // relatively flat foundation near the house so the player doesn't fall.
+        const double WashY=-1670.-.16*(X+2200.);
+        const double WashDist=FMath::Abs(Y-WashY);
+        const double Wash=-FMath::Max(0.,1.-WashDist/620.)*38.;
+        const double Home=FMath::Clamp(FVector2D(X+2200.,Y+1600.).Size()/920.,0.,1.);
         const double Edge=FMath::Clamp((FMath::Max(FMath::Abs(X),FMath::Abs(Y))-2450)/2800,0.,1.);
         const float Hills=FMath::PerlinNoise2D(FVector2D(X,Y)*.00029f+FVector2D(63,19));
         const float Grain=FMath::PerlinNoise2D(FVector2D(X,Y)*.0016f);
-        return -3.+Edge*(350+1750*FMath::Abs(Hills)+105*Grain);
+        return -3.+Edge*(350+1750*FMath::Abs(Hills)+105*Grain)+Wash*Home;
     };
     for (int32 Row=0; Row<Grid; ++Row)
         for(int32 Col=0; Col<Grid; ++Col)
@@ -90,6 +108,8 @@ void AContactField::BeginPlay()
     auto Put=[](UInstancedStaticMeshComponent* Mesh,FVector P,FVector Size,FRotator Rotation=FRotator::ZeroRotator) {
         Mesh->AddInstance(FTransform(Rotation,P,Size));
     };
+    if (!bSolo)
+    {
     for (int32 Side : {-1,1})
         for(int32 Index=0; Index<12; ++Index)
         {
@@ -146,6 +166,8 @@ void AContactField::BeginPlay()
     Dish->SetMaterial(0,Concrete->GetMaterial(0));
     Put(Metal,{2700,520,1015},{.11f,.11f,4.8},FRotator(0,0,-29));
     Put(Mast,{2700,601,1200},{.44f,.44f,.71f});
+    } // End relay-only station scenery; don't spawn a firing range in Solo Hunt.
+
     // Sky silhouettes for the crash-site nightmare. These are lightweight procedural
     // primitives until rigged, art-directed meshes and materials replace them.
     auto* VoidMetal=Batch(TEXT("/Engine/BasicShapes/Sphere"),{.012f,.015f,.024f},false);
@@ -222,13 +244,56 @@ void AContactField::BeginPlay()
     Put(Metal,Home+FVector(-130,-130,45),{1.5f,1.2f,.5f}); // old couch
     Put(Glass,Home+FVector(-320,-155,180),{.05f,1.1f,.85f}); // rear window
 
+    if (bSolo)
+    {
+        // House practical light contrasts with the cold, distant crash glow.
+        auto AddLocalLight=[&](const TCHAR* Name,FVector Location,FLinearColor Color,float Intensity,float Radius)
+        {
+            auto* Light=NewObject<UPointLightComponent>(this,Name);
+            Light->SetupAttachment(RootComponent);
+            Light->SetRelativeLocation(Location);
+            Light->SetLightColor(Color);
+            Light->SetIntensity(Intensity);
+            Light->SetAttenuationRadius(Radius);
+            Light->RegisterComponent();
+        };
+        AddLocalLight(TEXT("PorchLight"),Home+FVector(280,0,260),
+            FLinearColor(1.f,.65f,.32f),900.f,850.f);
+        AddLocalLight(TEXT("CrashAfterglow"),FVector(3600,-2600,190),
+            FLinearColor(.18f,.62f,1.f),3400.f,1350.f);
+        // Scraps and a worn dirt track replace geometric barriers in Solo Hunt.
+        auto Track=Batch(Cube,{.20f,.14f,.10f},false);
+        for (int I=0;I<38;++I)
+        {
+            const float T=(I+.5f)/38.f;
+            const FVector P=FMath::Lerp(Home,FVector(3600,-2600,0),T);
+            const float Drift=125.f*FMath::Sin(T*19.f);
+            // Thin ground-level markings; never block player movement.
+            Put(Track,FVector(P.X,P.Y+Drift,2),FVector(1.7f,2.8f,.018f),
+                FRotator(0,-10,0));
+        }
+        auto Debris=Batch(Cube,{.10f,.11f,.14f},false);
+        FRandomStream Scatter(1808);
+        for (int I=0;I<75;++I)
+        {
+            const float Theta=Scatter.FRandRange(0.f,2.f*PI);
+            const float Radius=Scatter.FRandRange(720.f,2100.f);
+            const FVector P(3600.f+Radius*FMath::Cos(Theta),
+                -2600.f+Radius*FMath::Sin(Theta),Scatter.FRandRange(8.f,50.f));
+            Put(Debris,P,FVector(Scatter.FRandRange(.1f,.55f),
+                Scatter.FRandRange(.08f,.40f),Scatter.FRandRange(.04f,.20f)),
+                FRotator(Scatter.FRandRange(-30.f,30.f),Scatter.FRandRange(0.f,360.f),
+                Scatter.FRandRange(-45.f,45.f)));
+        }
+    }
+
     FRandomStream Random(915);
     const double RockSize=Rocks->GetStaticMesh() ? FMath::Max(1.,Rocks->GetStaticMesh()->GetBounds().BoxExtent.GetMax()) : 100.;
     for(int i=0;i<340;++i)
     {
         const double X=Random.FRandRange(-9200,9200),Y=Random.FRandRange(-9200,9200);
-        const bool Yard=FMath::Abs(X)<2400 && FMath::Abs(Y)<2400;
-        const double S=Random.FRandRange(Yard?4:50,Yard?22:310)/RockSize;
+        const bool Yard=!bSolo && FMath::Abs(X)<2400 && FMath::Abs(Y)<2400;
+        const double S=Random.FRandRange(Yard?4:30,Yard?22:245)/RockSize;
         const auto Bounds=Rocks->GetStaticMesh()->GetBounds();
         Put(Rocks,{X,Y,Height(X,Y)-(Bounds.Origin.Z-.28f*Bounds.BoxExtent.Z)*S*.75f},
             FVector(S*1.3,S,S*.75f),FRotator(0,Random.FRandRange(0,360),0));

@@ -1,4 +1,5 @@
 #include "ContactMission.h"
+#include "ContactImportedAssets.h"
 #include "Camera/CameraComponent.h"
 #include "Animation/AnimSequence.h"
 #include "Components/CapsuleComponent.h"
@@ -35,8 +36,7 @@ namespace
         // The procedural fallback remains only when the real asset is absent.
         if (!Nordic)
         {
-            USkeletalMesh* Grey=LoadObject<USkeletalMesh>(nullptr,
-                TEXT("/Game/Characters/Greys/SK_GreyAlien.SK_GreyAlien"));
+            USkeletalMesh* Grey=ContactAssets::Grey();
             if (Grey)
             {
                 Unit->GetMesh()->SetSkeletalMesh(Grey);
@@ -48,6 +48,19 @@ namespace
                 return;
             }
             UE_LOG(LogTemp,Warning,TEXT("GREY ASSET not imported; showing procedural fallback"));
+        }
+        if (Nordic)
+        {
+            // New monster leader replaces the Nordic visual, not combat mechanics.
+            if (USkeletalMesh* Leader=ContactAssets::Boss())
+            {
+                Unit->GetMesh()->SetSkeletalMesh(Leader);
+                Unit->GetMesh()->SetRelativeLocation(FVector(0,0,-88));
+                Unit->GetMesh()->SetRelativeRotation(FRotator(0,-90,0));
+                Unit->GetMesh()->SetVisibility(true,true);
+                UE_LOG(LogTemp,Display,TEXT("CONTACT ASSET monster leader uses imported skeletal mesh"));
+                return;
+            }
         }
         const UStaticMesh* Sphere=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere"));
         const UStaticMesh* Cylinder=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder"));
@@ -244,6 +257,8 @@ void AContactResponder::AssignHunter(int32 Index)
     if (GetMesh()->GetSkeletalMeshAsset() &&
         GetMesh()->GetSkeletalMeshAsset()->GetPathName().Contains(TEXT("/Characters/Greys/")))
     {
+        IdlePose=nullptr;
+        JogPose=nullptr;
         IdlePose=LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Greys/AS_GreyIdle.AS_GreyIdle"));
         JogPose=LoadObject<UAnimSequence>(nullptr,TEXT("/Game/Characters/Greys/AS_GreyWalk.AS_GreyWalk"));
         if (!IdlePose) JogPose=nullptr; // don't play mannequin clips against Grey skeleton
@@ -265,6 +280,11 @@ void AContactResponder::AssignNordicBoss()
     SetActorScale3D(FVector(Scale));
     GetMesh()->SetRelativeScale3D(FVector(.94f,.83f,1.02f));
     BuildAlienVisual(this,true);
+    if (ContactAssets::Boss() && GetMesh()->GetSkeletalMeshAsset()==ContactAssets::Boss())
+    {
+        IdlePose=nullptr;
+        JogPose=nullptr; // no mannequin animation against a different rig
+    }
     for (int32 I=0; I<GetMesh()->GetNumMaterials(); ++I)
         if (auto* Mat=GetMesh()->CreateDynamicMaterialInstance(I))
             Mat->SetVectorParameterValue(TEXT("Tint"),FLinearColor(.93f,.96f,1.f));

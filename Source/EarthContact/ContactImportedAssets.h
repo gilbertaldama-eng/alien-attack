@@ -7,9 +7,25 @@
 #include "Modules/ModuleManager.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/Paths.h"
 
 namespace ContactAssets
 {
+    inline UObject* Configured(const TCHAR* Role, bool bSkeletal)
+    {
+        FString Path;
+        const FString Filename=FPaths::ProjectConfigDir()/TEXT("ImportedAssets.ini");
+        if (!GConfig || !GConfig->GetString(TEXT("EarthContact.ImportedAssets"),Role,Path,Filename) || Path.IsEmpty())
+            return nullptr;
+        UObject* Asset=StaticLoadObject(bSkeletal ? USkeletalMesh::StaticClass() : UStaticMesh::StaticClass(),
+                                        nullptr,*Path);
+        if (!Asset)
+            UE_LOG(LogTemp,Warning,TEXT("CONTACT ASSET configured %s missing: %s"),Role,*Path);
+        else UE_LOG(LogTemp,Display,TEXT("CONTACT ASSET configured %s => %s"),Role,*Path);
+        return Asset;
+    }
+
     inline UObject* FindSingle(const TCHAR* Folder, const TCHAR* Token, bool bSkeletal)
     {
         FAssetRegistryModule& Module=FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
@@ -42,20 +58,24 @@ namespace ContactAssets
     }
     inline USkeletalMesh* Grey()
     {
+        if (auto* Asset=Cast<USkeletalMesh>(Configured(TEXT("Grey"),true))) return Asset;
         if (auto* Exact=LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Characters/Greys/SK_GreyAlien.SK_GreyAlien"))) return Exact;
         return Cast<USkeletalMesh>(FindSingle(TEXT("/Game/Characters/Greys"),TEXT(""),true));
     }
     inline USkeletalMesh* Boss()
     {
+        if (auto* Asset=Cast<USkeletalMesh>(Configured(TEXT("MonsterLeader"),true))) return Asset;
         if (auto* Mesh=Cast<USkeletalMesh>(FindSingle(TEXT("/Game/Characters/MonsterLeader"),TEXT(""),true))) return Mesh;
         return Cast<USkeletalMesh>(FindSingle(TEXT("/Game/Characters/Monsters"),TEXT(""),true));
     }
     inline UStaticMesh* CrashedUFO()
     {
+        if (auto* Asset=Cast<UStaticMesh>(Configured(TEXT("CrashedUFO"),false))) return Asset;
         return Cast<UStaticMesh>(FindSingle(TEXT("/Game/Vehicles/UFOs/Crashed"),TEXT(""),false));
     }
     inline UStaticMesh* IntactUFO()
     {
+        if (auto* Asset=Cast<UStaticMesh>(Configured(TEXT("IntactUFO"),false))) return Asset;
         return Cast<UStaticMesh>(FindSingle(TEXT("/Game/Vehicles/UFOs/Intact"),TEXT(""),false));
     }
 }

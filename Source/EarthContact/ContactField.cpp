@@ -241,7 +241,9 @@ void AContactField::BeginPlay()
     };
     const bool bRealIntactUFO=SpawnImported(ContactAssets::IntactUFO(),
         FVector(1800,3400,1550),1500,FRotator(0,-15,0));
-    const bool bRealCrashedUFO=SpawnImported(ContactAssets::CrashedUFO(),
+    // During Solo Hunt, the crash actor is spawned by AContactMode
+    // *after* the player sees the descending saucer. Do not pre-place a wreck.
+    const bool bRealCrashedUFO=!bSolo && SpawnImported(ContactAssets::CrashedUFO(),
         FVector(3600,-2600,140),1300,FRotator(0,19,14));
     UE_LOG(LogTemp,Display,TEXT("CONTACT UFOs intact=%d crashed=%d"),bRealIntactUFO,bRealCrashedUFO);
     // Black hovering jellyfish craft, visibly distinct from the grounded wreck.
@@ -266,7 +268,7 @@ void AContactField::BeginPlay()
     Put(Chrome,Witch+FVector(0,0,145),{1.2f,1.2f,.11f}); // wide-brim silhouette
     // A crashed circular craft in the outer desert, partly buried in sand.
     const FVector Wreck(3600,-2600,110);
-    if (!bRealCrashedUFO)
+    if (!bSolo && !bRealCrashedUFO)
     {
         Put(Metal,Wreck,{5.2f,5.2f,.35f},FRotator(0,19,14));
         Put(Chrome,Wreck+FVector(0,0,75),{3.4f,3.4f,.7f});

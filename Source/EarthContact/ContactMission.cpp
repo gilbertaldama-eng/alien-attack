@@ -194,12 +194,38 @@ AContactResponder::AContactResponder()
     Gun->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Gun->SetRelativeScale3D(FVector(1.18f)); // make the existing rifle more readable
     Sidearm = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SidearmProxy"));
-    Sidearm->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube")));
+    // Use the free First Person template pistol mesh if it exists in the project.
+    // Otherwise construct a detailed pistol silhouette from built-in primitives:
+    // long squared slide, angled grip, trigger guard and aligned iron sights.
+    UStaticMesh* PistolModel=LoadObject<UStaticMesh>(nullptr,
+        TEXT("/Game/Weapons/Pistol/Meshes/SM_Pistol.SM_Pistol"));
+    UStaticMesh* Shape=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube"));
+    Sidearm->SetStaticMesh(PistolModel ? PistolModel : Shape);
     Sidearm->SetupAttachment(GetMesh(),TEXT("hand_r"));
     Sidearm->SetRelativeLocation(FVector(8,18,-5));
-    Sidearm->SetRelativeScale3D(FVector(.09f,.27f,.13f));
+    Sidearm->SetRelativeScale3D(PistolModel ? FVector(1.f) : FVector(.085f,.24f,.067f));
+    if (!PistolModel)
+    {
+        auto AddPistolDetail=[&](const TCHAR* Name,FVector Offset,FVector Size,FRotator Rotate=FRotator::ZeroRotator)
+        {
+            auto* Detail=CreateDefaultSubobject<UStaticMeshComponent>(Name);
+            Detail->SetupAttachment(Sidearm);
+            Detail->SetStaticMesh(Shape);
+            Detail->SetRelativeLocationAndRotation(Offset,Rotate);
+            Detail->SetRelativeScale3D(Size);
+            Detail->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        };
+        AddPistolDetail(TEXT("PistolGrip"),FVector(-1,-12,-10),
+            FVector(.078f,.075f,.19f),FRotator(-12,0,0));
+        AddPistolDetail(TEXT("PistolTriggerGuard"),FVector(0,1,-5),
+            FVector(.035f,.085f,.025f));
+        AddPistolDetail(TEXT("PistolFrontSight"),FVector(0,19,4),
+            FVector(.04f,.025f,.025f));
+        AddPistolDetail(TEXT("PistolRearSight"),FVector(0,-17,4),
+            FVector(.06f,.02f,.027f));
+    }
     Sidearm->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Sidearm->SetVisibility(false);
+    Sidearm->SetVisibility(false,true);
     auto* Boom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     Boom->SetupAttachment(RootComponent);
     Boom->SetRelativeLocation({0,0,55});
@@ -214,6 +240,19 @@ void AContactResponder::BeginPlay()
 {
     Super::BeginPlay();
     Animate(false);
+}
+
+void AContactResponder::BeginSoloHuntWithPistol()
+{
+    if (!HasAuthority()) return;
+    // At home the responder owns a 17-round sidearm, not a battle rifle.
+    // Switching to the existing rifle remains possible after the prologue.
+    bPistol=true;
+    Ammo=PistolAmmo;
+    bTrigger=false;
+    Gun->SetVisibility(false,true);
+    Sidearm->SetVisibility(true,true);
+    UE_LOG(LogTemp,Display,TEXT("INTRO starter pistol equipped, rounds=%d"),Ammo);
 }
 
 void AContactResponder::AssignPost(bool Alien, int32 Index)
@@ -359,8 +398,18 @@ void AContactResponder::SetupPlayerInputComponent(UInputComponent* Input)
     Input->BindAction("EquipPistol",IE_Pressed,this,&AContactResponder::EquipPistol);
     Input->BindAction("Retry",IE_Pressed,this,&AContactResponder::Retry);
 }
-void AContactResponder::Forward(float V) { AddMovementInput(GetActorForwardVector(),V); }
-void AContactResponder::Right(float V) { AddMovementInput(GetActorRightVector(),V); }
+void AContactResponder::Forward(float V)
+{
+    const auto* State=GetWorld() ? GetWorld()->GetGameState<AContactState>() : nullptr;
+    if (State && State->bHunt && State->IntroStage<2) return;
+    AddMovementInput(GetActorForwardVector(),V);
+}
+void AContactResponder::Right(float V)
+{
+    const auto* State=GetWorld() ? GetWorld()->GetGameState<AContactState>() : nullptr;
+    if (State && State->bHunt && State->IntroStage<2) return;
+    AddMovementInput(GetActorRightVector(),V);
+}
 void AContactResponder::SprintOn() { ServerSprint(true); }
 void AContactResponder::SprintOff() { ServerSprint(false); }
 void AContactResponder::ServerSprint_Implementation(bool On) { GetCharacterMovement()->MaxWalkSpeed = On ? 700 : 440; }
@@ -379,8 +428,8 @@ void AContactResponder::ServerEquip_Implementation(bool Pistol)
     bReloading=false;
     bTrigger=false;
     NextShot=GetWorld()->GetTimeSeconds()+.18;
-    Gun->SetVisibility(!bPistol);
-    Sidearm->SetVisibility(bPistol);
+    Gun->SetVisibility(!bPistol,true);
+    Sidearm->SetVisibility(bPistol,true);
 }
 void AContactResponder::ServerReload_Implementation()
 {
@@ -582,6 +631,8 @@ void AContactResponder::Tick(float Delta)
             Shoot(Enemy->GetActorLocation()+FVector(0,0,25),true);
         return;
     }
+    if (auto* State=GetWorld()->GetGameState<AContactState>())
+        if (State->bHunt && State->IntroStage<2) return; // gaming / barking prologue
     if (bTrigger && !bReloading && Now>=NextShot && Controller)
     {
         FVector Eye; FRotator View;
@@ -685,7 +736,13 @@ void AContactMode::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
     if (auto* Pawn=Cast<AContactResponder>(NewPlayer->GetPawn()))
+    {
+        const bool bSolo=GetNetMode()==NM_Standalone &&
+            !UGameplayStatics::ParseOption(OptionsString,TEXT("Mission")).Equals(
+                TEXT("Relay"),ESearchCase::IgnoreCase);
+        if (bSolo) Pawn->BeginSoloHuntWithPistol();
         UE_LOG(LogTemp,Display,TEXT("BATTLE deployed hp=%d ammo=%d position=%s"),Pawn->Health,Pawn->Ammo,*Pawn->GetActorLocation().ToCompactString());
+    }
 }
 void AContactMode::StartPlay()
 {

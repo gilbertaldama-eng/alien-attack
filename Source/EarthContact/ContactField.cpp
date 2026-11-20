@@ -309,8 +309,8 @@ void AContactField::BeginPlay()
         };
         AddLocalLight(TEXT("PorchLight"),Home+FVector(280,0,260),
             FLinearColor(1.f,.65f,.32f),900.f,850.f);
-        AddLocalLight(TEXT("CrashAfterglow"),FVector(3600,-2600,190),
-            FLinearColor(.18f,.62f,1.f),3400.f,1350.f);
+        // The crash site stays dark until AContactMode plays the impact.
+        // CrashAfterglow is spawned only when the ship actually hits ground.
         // Scraps and a worn dirt track replace geometric barriers in Solo Hunt.
         auto Track=Batch(Cube,{.20f,.14f,.10f},false);
         for (int I=0;I<38;++I)

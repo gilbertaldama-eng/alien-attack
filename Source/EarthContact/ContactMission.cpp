@@ -494,9 +494,9 @@ void AContactResponder::Tick(float Delta)
     if (IsTrooper())
     {
         if (GetWorld()->GetGameState<AContactState>()->bHunt &&
-            GetWorld()->GetGameState<AContactState>()->IntroStage < 4)
+            GetWorld()->GetGameState<AContactState>()->IntroStage < 5)
         {
-            if (GetWorld()->GetGameState<AContactState>()->IntroStage==3)
+            if (GetWorld()->GetGameState<AContactState>()->IntroStage==4)
             {
                 // Uncanny pursuit tableau: greys converge on the same crash corridor as the dog.
                 // A properly animated skeletal chase is a later asset/AI milestone.
@@ -698,6 +698,11 @@ void AContactMode::StartPlay()
         State->Raiders=0;
         State->IntroStage=0;
         IntroStageStarted=GetWorld()->GetTimeSeconds();
+        bCrashImpactPlayed=false;
+        FallingSaucer=nullptr;
+        SaucerVisual=nullptr;
+        // Start the player in a short, fake military-shooter vignette.
+        // The HUD shows an original arcade parody until the dog interrupts.
         // Temporary in-engine dog silhouette: a production quadruped model/rig is still needed.
         StoryDog=GetWorld()->SpawnActor<AActor>(AActor::StaticClass(),FVector(-1630,-1650,75),FRotator::ZeroRotator);
         if (StoryDog)
@@ -738,27 +743,83 @@ void AContactMode::StartPlay()
             if (ensure(Unit)) Unit->AssignPost(Side!=0,Slot);
         }
 }
+void AContactMode::StartFallingSaucer()
+{
+    if (FallingSaucer || !GetWorld()) return;
+    UStaticMesh* Ship=ContactAssets::IntactUFO();
+    if (!Ship) Ship=ContactAssets::CrashedUFO();
+    if (!Ship)
+    {
+        UE_LOG(LogTemp,Warning,TEXT("INTRO UFO imported ship unavailable: using basic disc stand-in"));
+        Ship=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder"));
+    }
+    if (!Ship) return;
+    FallingSaucer=GetWorld()->SpawnActor<AActor>(AActor::StaticClass(),
+        SaucerFrom,FRotator(-12,27,0));
+    if (!FallingSaucer) return;
+    USceneComponent* Root=NewObject<USceneComponent>(FallingSaucer,TEXT("CrashShipRoot"));
+    FallingSaucer->SetRootComponent(Root);
+    Root->RegisterComponent();
+    SaucerVisual=NewObject<UStaticMeshComponent>(FallingSaucer,TEXT("AnimatedSaucer"));
+    SaucerVisual->SetupAttachment(Root);
+    SaucerVisual->SetStaticMesh(Ship);
+    SaucerVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    const FVector Extent=Ship->GetBounds().BoxExtent;
+    const float Width=FMath::Max(1.f,2.f*FMath::Max(Extent.X,Extent.Y));
+    SaucerVisual->SetRelativeScale3D(FVector(1300.f/Width));
+    SaucerVisual->RegisterComponent();
+    UE_LOG(LogTemp,Display,TEXT("INTRO falling UFO spawned mesh=%s"),*Ship->GetPathName());
+}
+
+void AContactMode::PlayCrashImpact()
+{
+    if (bCrashImpactPlayed || !GetWorld()) return;
+    bCrashImpactPlayed=true;
+    if (FallingSaucer)
+    {
+        // Prefer the user's crashed saucer as the wrecked landing appearance.
+        if (SaucerVisual)
+        {
+            if (UStaticMesh* Crashed=ContactAssets::CrashedUFO())
+            {
+                SaucerVisual->SetStaticMesh(Crashed);
+                const float Span=FMath::Max(1.f,2.f*FMath::Max(
+                    Crashed->GetBounds().BoxExtent.X,Crashed->GetBounds().BoxExtent.Y));
+                SaucerVisual->SetRelativeScale3D(FVector(1300.f/Span));
+            }
+        }
+        FallingSaucer->SetActorLocation(SaucerImpact);
+        FallingSaucer->SetActorRotation(FRotator(17,32,14));
+    }
+    // A short-lived light and radial physical debris mark the impact.
+    if (APointLight* Flash=GetWorld()->SpawnActor<APointLight>(
+        SaucerImpact+FVector(0,0,240),FRotator::ZeroRotator))
+    {
+        if (UPointLightComponent* Light=Flash->PointLightComponent.Get())
+        {
+            Light->SetIntensity(850000.f);
+            Light->SetAttenuationRadius(6800.f);
+            Light->SetLightColor(FLinearColor(.58f,.83f,1.f));
+        }
+        Flash->SetLifeSpan(1.2f);
+    }
+    // Camera shake is mild so the intro doesn't override player control.
+    if (APlayerController* PC=UGameplayStatics::GetPlayerController(this,0))
+        if (PC->PlayerCameraManager)
+            PC->PlayerCameraManager->StartCameraFade(0.f,.18f,.05f,
+                FLinearColor(.75f,.85f,1.f),false,false);
+    UE_LOG(LogTemp,Display,TEXT("INTRO UFO impacted: wreck visible at crater"));
+}
+
 void AContactMode::SetIntroStage(int32 NewStage)
 {
-    if (auto* State=GetGameState<AContactState>())
+    if (AContactState* State=GetGameState<AContactState>())
     {
         State->IntroStage=NewStage;
         IntroStageStarted=GetWorld()->GetTimeSeconds();
         UE_LOG(LogTemp,Display,TEXT("INTRO stage=%d"),NewStage);
-        if (NewStage==1)
-        {
-            // Distant cold-white crash flash. Audio and Niagara remain asset tasks.
-            if (auto* Flash=GetWorld()->SpawnActor<APointLight>(FVector(3600,-2600,650),FRotator::ZeroRotator))
-            {
-                if (auto* Light=Flash->PointLightComponent.Get())
-                {
-                    Light->SetIntensity(600000.f);
-                    Light->SetAttenuationRadius(6500.f);
-                    Light->SetLightColor(FLinearColor(.64f,.84f,1.f));
-                }
-                Flash->SetLifeSpan(1.8f);
-            }
-        }
+        if (NewStage==2) StartFallingSaucer();
+        if (NewStage==3) PlayCrashImpact();
     }
 }
 
@@ -790,13 +851,27 @@ void AContactMode::Tick(float Delta)
     if (!State || State->Result!=EContactResult::Active) return;
     auto* Player=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
     if (!Player) return;
-    if (State->bHunt && State->IntroStage<4 && State->Result==EContactResult::Active)
+    if (State->bHunt && State->IntroStage<5 && State->Result==EContactResult::Active)
     {
         const double Since=GetWorld()->GetTimeSeconds()-IntroStageStarted;
         const FVector Crash(3600,-2600,100);
-        if (State->IntroStage==0 && Since>=6.0) SetIntroStage(1);
-        else if (State->IntroStage==1 && Since>=3.5) SetIntroStage(2);
+        if (State->IntroStage==0 && Since>=7.0) SetIntroStage(1);
+        else if (State->IntroStage==1 && Since>=4.0) SetIntroStage(2);
         else if (State->IntroStage==2)
+        {
+            // Visible five-second flight: high over the house, then down into
+            // the existing crater. Rotate and accelerate into the ground.
+            const float T=FMath::Clamp(float(Since/5.0),0.f,1.f);
+            const float Ease=T*T*(3.f-2.f*T);
+            if (FallingSaucer)
+            {
+                FallingSaucer->SetActorLocation(FMath::Lerp(SaucerFrom,SaucerImpact,Ease));
+                FallingSaucer->SetActorRotation(FRotator(-12.f+34.f*Ease,
+                    27.f+540.f*T,6.f+13.f*Ease));
+            }
+            if (T>=1.f) SetIntroStage(3);
+        }
+        else if (State->IntroStage==3)
         {
             if (StoryDog)
             {
@@ -813,13 +888,13 @@ void AContactMode::Tick(float Delta)
             if (FVector::Dist2D(Player->GetActorLocation(),Crash)<4400 || Since>36)
             {
                 SpawnStoryGreys();
-                SetIntroStage(3);
+                SetIntroStage(4);
             }
         }
-        else if (State->IntroStage==3)
+        else if (State->IntroStage==4)
         {
             if (FVector::Dist2D(Player->GetActorLocation(),Crash)<2100)
-                SetIntroStage(4);
+                SetIntroStage(5);
         }
     }
     int32 Allies=0,Raiders=0;
@@ -830,7 +905,7 @@ void AContactMode::Tick(float Delta)
     if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
-    else if (State->bHunt && State->IntroStage==4 && Raiders==0 && !State->bBossSpawned)
+    else if (State->bHunt && State->IntroStage==5 && Raiders==0 && !State->bBossSpawned)
     {
         const FVector BossStart(350,1050,140);
         FActorSpawnParameters SpawnOptions;
@@ -843,7 +918,7 @@ void AContactMode::Tick(float Delta)
         }
         else UE_LOG(LogTemp,Error,TEXT("NORDIC BOSS spawn failed; mission remains active"));
     }
-    else if (State->bHunt ? (State->IntroStage==4 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
+    else if (State->bHunt ? (State->IntroStage==5 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
         State->Result=EContactResult::Won;
     if (State->Result!=EContactResult::Active)
         UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);

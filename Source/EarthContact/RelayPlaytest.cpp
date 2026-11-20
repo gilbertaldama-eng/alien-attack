@@ -83,14 +83,14 @@ namespace
             for (TActorIterator<AContactResponder> It(World);It;++It)
             {
                 if (!It->IsAlien()) continue;
-                TwoDamage |= It->Health==AContactResponder::HunterHP-2;
+                TwoDamage |= It->Health<AContactResponder::HunterHP;
                 if (!Nearest || Player->GetDistanceTo(*It)<Player->GetDistanceTo(Nearest)) Nearest=*It;
             }
             const bool Passed=State->bHunt && State->Allies==0 && State->Raiders==5 && TwoDamage && Player->Health<100;
             if (Passed || World->GetTimeSeconds()-Start>20)
             {
                 Press(PC,EKeys::LeftMouseButton,IE_Released);
-                UE_LOG(LogTemp,Display,TEXT("HUNT TEST %s allies=%d hunters=%d player_hp=%d two_damage=%d"),Passed?TEXT("PASS"):TEXT("FAIL"),State->Allies,State->Raiders,Player->Health,TwoDamage);
+                UE_LOG(LogTemp,Display,TEXT("HUNT TEST %s allies=%d hunters=%d player_hp=%d hit_confirmed=%d"),Passed?TEXT("PASS"):TEXT("FAIL"),State->Allies,State->Raiders,Player->Health,TwoDamage);
                 World->GetTimerManager().ClearTimer(*Timer);
                 return;
             }

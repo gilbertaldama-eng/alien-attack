@@ -24,7 +24,7 @@ public:
     bool bHunt = false;
     bool bBossSpawned = false;
     bool bBossDefeated = false;
-    // Solo mode: 0=inside home, 1=crash, 2=dog pursuit, 3=Grey sighting, 4=active hunt.
+    // Solo mode: 0=shooter-game opening, 1=dog barking, 2=falling UFO, 3=dog pursuit, 4=Grey sighting, 5=active hunt.
     int32 IntroStage = 4;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
@@ -119,6 +119,14 @@ public:
 private:
     double IntroStageStarted = 0;
     UPROPERTY() TObjectPtr<AActor> StoryDog;
+    UPROPERTY() TObjectPtr<AActor> FallingSaucer;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> SaucerVisual;
+    FVector SaucerFrom=FVector(-4400,2000,4600);
+    FVector SaucerImpact=FVector(3600,-2600,20);
+    bool bCrashImpactPlayed=false;
+    double LastBarkAt=0;
+    void StartFallingSaucer();
+    void PlayCrashImpact();
     FVector StoryDogDestination = FVector(3200,-2550,120);
     void SetIntroStage(int32 NewStage);
     void SpawnStoryGreys();

@@ -337,6 +337,80 @@ void AContactField::BeginPlay()
         }
     }
 
+    // Integrate *already installed* free Epic/Fab content. No asset is
+    // downloaded or changed, no user .uasset is overwritten. Spawn only if
+    // a suitable Static Mesh is found in a known free-content folder.
+    if (bSolo)
+    {
+        UStaticMesh* ScannedRock=ContactAssets::EnvironmentMesh(TEXT("DesertRock"),
+            {TEXT("rock"),TEXT("boulder"),TEXT("sandstone")});
+        UStaticMesh* DesertPlant=ContactAssets::EnvironmentMesh(TEXT("DesertPlant"),
+            {TEXT("cactus"),TEXT("yucca"),TEXT("shrub"),TEXT("bush"),TEXT("dryplant")});
+        UStaticMesh* AbandonedVehicle=ContactAssets::EnvironmentMesh(TEXT("AbandonedVehicle"),
+            {TEXT("pickup"),TEXT("truck"),TEXT("sedan"),TEXT("carbody")});
+        auto SpawnScatter=[&](UStaticMesh* Asset,int32 Count,float WidthMin,float WidthMax,
+                              int32 Seed,float MinRouteGap)
+        {
+            if (!Asset) return 0;
+            UInstancedStaticMeshComponent* BatchMesh=NewObject<UInstancedStaticMeshComponent>(this);
+            BatchMesh->SetupAttachment(RootComponent);
+            BatchMesh->SetStaticMesh(Asset);
+            BatchMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            BatchMesh->RegisterComponent();
+            const FBoxSphereBounds Bounds=Asset->GetBounds();
+            const float Width=FMath::Max(1.f,2.f*FMath::Max(Bounds.BoxExtent.X,Bounds.BoxExtent.Y));
+            FRandomStream Stream(Seed);
+            int32 Placed=0;
+            for (int I=0;I<Count*5 && Placed<Count;++I)
+            {
+                const float X=Stream.FRandRange(-8600.f,8600.f);
+                const float Y=Stream.FRandRange(-8600.f,8600.f);
+                const FVector2D P(X,Y),A(-2200.f,-1600.f),B(3600.f,-2600.f);
+                const FVector2D AB=B-A;
+                const float T=FMath::Clamp(FVector2D::DotProduct(P-A,AB)/
+                    FMath::Max(1.f,AB.SizeSquared()),0.f,1.f);
+                const float RouteDistance=FVector2D::Distance(P,A+AB*T);
+                if (RouteDistance<MinRouteGap ||
+                    FVector2D::Distance(P,A)<1100.f ||
+                    FVector2D::Distance(P,B)<1100.f)
+                    continue;
+                const float WantedWidth=Stream.FRandRange(WidthMin,WidthMax);
+                const float Scale=WantedWidth/Width;
+                const FVector Pos(X,Y,Height(X,Y)-
+                    (Bounds.Origin.Z-Bounds.BoxExtent.Z)*Scale);
+                BatchMesh->AddInstance(FTransform(
+                    FRotator(0,Stream.FRandRange(0.f,360.f),0),
+                    Pos,FVector(Scale)));
+                ++Placed;
+            }
+            return Placed;
+        };
+        const int32 RockCount=SpawnScatter(ScannedRock,110,75.f,320.f,2419,500.f);
+        const int32 PlantCount=SpawnScatter(DesertPlant,165,45.f,160.f,2537,330.f);
+        // One grounded vehicle by the cabin. Keep house door and dog path clear.
+        if (AbandonedVehicle)
+        {
+            UStaticMeshComponent* Car=NewObject<UStaticMeshComponent>(
+                this,TEXT("FreePackHomesteadVehicle"));
+            Car->SetupAttachment(RootComponent);
+            Car->SetStaticMesh(AbandonedVehicle);
+            Car->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            const auto Bounds=AbandonedVehicle->GetBounds();
+            const float Span=FMath::Max(1.f,2.f*FMath::Max(
+                Bounds.BoxExtent.X,Bounds.BoxExtent.Y));
+            const float Scale=480.f/Span;
+            const float PX=-2750.f,PY=-2450.f;
+            Car->SetRelativeScale3D(FVector(Scale));
+            Car->SetRelativeLocationAndRotation(FVector(PX,PY,
+                Height(PX,PY)-(Bounds.Origin.Z-Bounds.BoxExtent.Z)*Scale),
+                FRotator(0,-22.f,0));
+            Car->RegisterComponent();
+        }
+        UE_LOG(LogTemp,Display,
+            TEXT("FREE PACK WORLD: rocks=%d plants=%d vehicle=%d (only previously installed assets)"),
+            RockCount,PlantCount,AbandonedVehicle?1:0);
+    }
+
     FRandomStream Random(915);
     // Never dereference the rock model when /Game/SimSandbox/Meshes/Rock
     // is not installed. Missing rocks must not crash the entire world.

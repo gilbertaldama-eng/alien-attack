@@ -24,7 +24,9 @@ public:
     bool bHunt = false;
     bool bBossSpawned = false;
     bool bBossDefeated = false;
-    // Solo mode: 0=shooter-game opening, 1=dog barking, 2=falling UFO, 3=dog pursuit, 4=Grey sighting, 5=active hunt.
+    bool bDogTaken = false; // Solo Hunt: drives rescue objective/HUD
+    // Solo: 0 game, 1 bark, 2 impact, 3 dog runs, 4 second UFO arrives,
+    // 5 tractor beam, 6 escape, 7 combat / rescue objective.
     int32 IntroStage = 4;
     void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };
@@ -40,6 +42,7 @@ public:
     void SetupPlayerInputComponent(UInputComponent* Input) override;
     void AssignPost(bool Alien, int32 Index);
     void BeginSoloHuntWithPistol();
+    void BeginRescueMode();
     void AssignHunter(int32 Index);
     void AssignNordicBoss();
     void TeleportFlash(bool bArrival);
@@ -122,6 +125,14 @@ private:
     UPROPERTY() TObjectPtr<AActor> StoryDog;
     UPROPERTY() TObjectPtr<AActor> FallingSaucer;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> SaucerVisual;
+    UPROPERTY() TObjectPtr<AActor> AbductorSaucer;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> AbductorBeam;
+    UPROPERTY() TObjectPtr<UPointLightComponent> AbductorGlow;
+    FVector DogBeamStart=FVector::ZeroVector;
+    bool bReinforcementsSpawned=false;
+    void StartAbductor();
+    void TickAbduction(float Delta,double Since);
+    void SpawnReinforcements();
     FVector SaucerFrom=FVector(-4400,2000,4600);
     FVector SaucerImpact=FVector(3600,-2600,20);
     bool bCrashImpactPlayed=false;

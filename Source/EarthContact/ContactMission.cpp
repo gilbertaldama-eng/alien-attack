@@ -19,6 +19,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWaveProcedural.h"
+#include "Components/AudioComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Camera/PlayerCameraManager.h"
 #include "DrawDebugHelpers.h"
@@ -373,6 +374,10 @@ void AContactResponder::AssignHunter(int32 Index)
     GreyPauseUntil=0;
     bGreyReachPending=false;
     bGreyFlankLeft=(Index%2)==0;
+    GreyDirective=Index%3; // 0 advance, 1 flank left, 2 flank right
+    LastOverlordOrder=-1;
+    NextServoStep=GetWorld()->GetTimeSeconds()+Index*.13;
+    ServoHoldUntil=0;
     UE_LOG(LogTemp,Display,TEXT("HUNT hunter=%d hp=%d capsule_cm=%.2f"),Index,Health,2*GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 }
 
@@ -517,30 +522,57 @@ void AContactResponder::Think(double Now)
         if (!Target.IsValid()) return;
         const FVector Toward=(Target->GetActorLocation()-Here).GetSafeNormal2D();
         const double Distance=FVector::Dist2D(Here,Target->GetActorLocation());
-        // Only small Greys do this. Boss retains its existing telepathic AI.
-        // The pause lets the player *notice* the creature before it acts.
-        if (!bBoss && Distance < 1150 && Now >= NextGreyBeat && Now >= GreyPauseUntil)
+        if (!bBoss)
         {
-            const bool Close=Distance < 170;
-            GreyPauseUntil=Now+(Close ? 1.15 : 1.75);
-            bGreyReachPending=Close;
-            NextGreyBeat=GreyPauseUntil+(Close ? 5.25 : 3.75);
-            bGreyFlankLeft=!bGreyFlankLeft;
-            UE_LOG(LogTemp,Display,TEXT("GREY ENCOUNTER %d %s distance=%.0f"),
-                Slot,Close?TEXT("reach warning"):TEXT("motionless stare"),Distance);
-        }
-        if (!bBoss && Now < GreyPauseUntil)
-        {
-            Destination=Here; // unnatural full stop, facing the player
-            return;
+            // The overlord transmits ONE synchronized task order to every
+            // worker. Individuals retain fixed slots; they do not improvise.
+            AContactResponder* Overlord=nullptr;
+            for (TActorIterator<AContactResponder> It(GetWorld());It;++It)
+                if (It->bBoss && It->Health>0) { Overlord=*It; break; }
+            const int32 Order=Overlord ? FMath::FloorToInt(Now/5.)%3 : -1;
+            if (Order!=LastOverlordOrder)
+            {
+                LastOverlordOrder=Order;
+                GreyDirective=(Order<0) ? Slot%3 : (Order+Slot%3)%3;
+                NextServoStep=Now+.14*(Slot%3);
+                GreyPauseUntil=FMath::Max(GreyPauseUntil,Now+(Order<0 ? .15 : .55));
+                UE_LOG(LogTemp,Display,TEXT("GREY UNIT %d directive=%d overlord=%d"),
+                    Slot,GreyDirective,Overlord?1:0);
+            }
+            // Sudden simultaneous stillness, then measured fixed-length steps.
+            // This applies without needing extra animation assets.
+            if (Now>=NextServoStep && Distance>185)
+            {
+                NextServoStep=Now+1.20;
+                ServoHoldUntil=Now+.22;
+            }
+            if (Distance<1150 && Now>=NextGreyBeat && Now>=GreyPauseUntil)
+            {
+                const bool Close=Distance<170;
+                GreyPauseUntil=Now+(Close ? 1.15 : 1.55);
+                bGreyReachPending=Close;
+                NextGreyBeat=GreyPauseUntil+(Close ? 5.25 : 3.75);
+                UE_LOG(LogTemp,Display,TEXT("GREY UNIT %d %s"),
+                    Slot,Close?TEXT("reach warning"):TEXT("fixed stare"));
+            }
+            if (Now<GreyPauseUntil || Now<ServoHoldUntil)
+            {
+                Destination=Here;
+                return;
+            }
         }
         Destination=Target->GetActorLocation();
-        // Flank around the player instead of following a straight-line zombie chase.
-        if (!bBoss && Distance > 180 && Distance < 1150)
+        if (!bBoss && Distance>180)
         {
+            // Surgical task decomposition: one closes distance, two constrain
+            // escape lanes. No independent random flank decisions.
             const FVector Side(-Toward.Y,Toward.X,0);
-            Destination=Target->GetActorLocation()-Toward*210.f+
-                Side*(bGreyFlankLeft ? 290.f : -290.f);
+            if (GreyDirective==1)
+                Destination=Target->GetActorLocation()-Toward*260.f+Side*430.f;
+            else if (GreyDirective==2)
+                Destination=Target->GetActorLocation()-Toward*260.f-Side*430.f;
+            else
+                Destination=Target->GetActorLocation()-Toward*95.f;
         }
         FCollisionQueryParams Query(NAME_None,false,this);
         Query.AddIgnoredActor(Target.Get());
@@ -607,24 +639,10 @@ void AContactResponder::Tick(float Delta)
     {
         if (GetWorld()->GetGameState<AContactState>()->bHunt &&
             GetWorld()->GetGameState<AContactState>()->IntroStage < 7)
-        {
-            if (GetWorld()->GetGameState<AContactState>()->IntroStage==7)
-            {
-                // Uncanny pursuit tableau: greys converge on the same crash corridor as the dog.
-                // A properly animated skeletal chase is a later asset/AI milestone.
-                const FVector Pursuit(3250,-2550,100);
-                const FVector Delta=Pursuit-GetActorLocation();
-                if (Delta.Size2D()>180)
-                {
-                    AddMovementInput(Delta.GetSafeNormal2D(),1.f,true);
-                    SetActorRotation(FRotator(0,Delta.Rotation().Yaw,0));
-                }
-            }
-            return;
-        }
+            return; // Workers await phase-four release; no unreachable chase branch.
         if (Now >= NextThink) { Think(Now); NextThink=Now+FMath::FRandRange(.18f,.28f); }
         const bool bGreyPaused=GetWorld()->GetGameState<AContactState>()->bHunt &&
-            !bBoss && Now < GreyPauseUntil;
+            !bBoss && (Now < GreyPauseUntil || Now < ServoHoldUntil);
         if (bGreyPaused)
         {
             GetCharacterMovement()->StopMovementImmediately();
@@ -656,7 +674,14 @@ void AContactResponder::Tick(float Delta)
             AddMovementInput(Direction.GetSafeNormal2D(),1,true);
         auto* Enemy = Target.Get();
         FVector Facing = Enemy ? Enemy->GetActorLocation()-GetActorLocation() : Direction;
-        if (!Facing.IsNearlyZero()) SetActorRotation(FRotator(0,Facing.Rotation().Yaw,0));
+        if (!Facing.IsNearlyZero())
+        {
+            // Tiny drones snap to exact headings instead of organically
+            // interpolating their rotations like human soldiers.
+            const float DesiredYaw=Facing.Rotation().Yaw;
+            const float Yaw=bBoss ? DesiredYaw : FMath::GridSnap(DesiredYaw,18.f);
+            SetActorRotation(FRotator(0,Yaw,0));
+        }
         if (GetWorld()->GetGameState<AContactState>()->bHunt)
         {
             // Boss projects a telepathic suppression field with visible line of sight.

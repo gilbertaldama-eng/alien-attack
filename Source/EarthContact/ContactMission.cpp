@@ -5,6 +5,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/SkeletalMesh.h"
@@ -991,19 +992,25 @@ void AContactMode::Tick(float Delta)
     {
         const double Since=GetWorld()->GetTimeSeconds()-IntroStageStarted;
         const FVector Crash(3600,-2600,100);
-        if (State->IntroStage==0 && Since>=7.0) SetIntroStage(1);
-        if (State->IntroStage==1 && GetWorld()->GetTimeSeconds()-LastBarkAt>.78)
+        if (State->IntroStage==0)
         {
-            LastBarkAt=GetWorld()->GetTimeSeconds();
-            if (StoryDog)
-            {
-                PlayIntroSound(this,StoryDog->GetActorLocation(),true);
-                // Small readable barking motion before the dog's chase.
-                StoryDog->SetActorRotation(FRotator(
-                    0,25.f*FMath::Sin(float(Since)*5.f),0));
-            }
+            if (Since>=7.0) { LastBarkAt=0; SetIntroStage(1); }
         }
-        else if (State->IntroStage==1 && Since>=4.0) SetIntroStage(2);
+        else if (State->IntroStage==1)
+        {
+            if (GetWorld()->GetTimeSeconds()-LastBarkAt>.78)
+            {
+                LastBarkAt=GetWorld()->GetTimeSeconds();
+                if (StoryDog)
+                {
+                    PlayIntroSound(this,StoryDog->GetActorLocation(),true);
+                    // Slight head-turn motion before running toward the crash.
+                    StoryDog->SetActorRotation(FRotator(
+                        0,25.f*FMath::Sin(float(Since)*5.f),0));
+                }
+            }
+            if (Since>=4.0) SetIntroStage(2);
+        }
         else if (State->IntroStage==2)
         {
             // Visible five-second flight: high over the house, then down into

@@ -11,6 +11,7 @@ class USoundBase;
 class UPointLightComponent;
 class UAudioComponent;
 class UStaticMeshComponent;
+class UCameraComponent;
 
 UENUM()
 enum class EContactResult : uint8 { Active, Won, Lost };
@@ -86,6 +87,15 @@ private:
     UPROPERTY() TObjectPtr<USoundBase> Report;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Gun;
     UPROPERTY() TObjectPtr<UStaticMeshComponent> Sidearm;
+    UPROPERTY() TObjectPtr<UCameraComponent> FirstPersonCamera;
+    UPROPERTY() TObjectPtr<UCameraComponent> ThirdPersonCamera;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> FirstPersonRifle;
+    UPROPERTY() TObjectPtr<UStaticMeshComponent> FirstPersonPistol;
+    bool bFirstPersonExperience = false;
+    float FirstPersonStride = 0.f;
+    float WeaponKick = 0.f;
+    float TargetFOV = 92.f;
+    void UpdateFirstPerson(float Delta);
     TWeakObjectPtr<AContactResponder> Target;
     FVector Destination = FVector::ZeroVector;
     int32 Slot = INDEX_NONE;

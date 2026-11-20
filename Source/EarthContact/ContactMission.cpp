@@ -993,6 +993,22 @@ void AContactMode::PlayCrashImpact()
     UE_LOG(LogTemp,Display,TEXT("INTRO UFO impacted: wreck visible at crater"));
 }
 
+void AContactMode::StartBattleMusic()
+{
+    if (BattleMusic || !GetWorld()) return;
+    // The provided YouTube link is a reference, NOT permission to redistribute
+    // its audio. Import a licensed cue under this path to activate playback.
+    USoundBase* Cue=LoadObject<USoundBase>(nullptr,
+        TEXT("/Game/Audio/Music/SC_LicensedBattleCue.SC_LicensedBattleCue"));
+    if (!Cue)
+    {
+        UE_LOG(LogTemp,Display,TEXT("MUSIC battle cue not installed/licensed; no copyrighted audio bundled"));
+        return;
+    }
+    BattleMusic=UGameplayStatics::SpawnSound2D(this,Cue,0.55f,1.f,0.f,nullptr,true,false);
+    UE_LOG(LogTemp,Display,TEXT("MUSIC licensed battle cue started"));
+}
+
 void AContactMode::SetIntroStage(int32 NewStage)
 {
     if (AContactState* State=GetGameState<AContactState>())
@@ -1002,6 +1018,7 @@ void AContactMode::SetIntroStage(int32 NewStage)
         UE_LOG(LogTemp,Display,TEXT("INTRO stage=%d"),NewStage);
         if (NewStage==2) StartFallingSaucer();
         if (NewStage==3) PlayCrashImpact();
+        if (NewStage==7) StartBattleMusic();
     }
 }
 
@@ -1274,5 +1291,12 @@ void AContactMode::Tick(float Delta)
     else if (State->bHunt ? (State->IntroStage==7 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
         State->Result=EContactResult::Won;
     if (State->Result!=EContactResult::Active)
+    {
+        if (BattleMusic)
+        {
+            BattleMusic->FadeOut(1.5f,0.f);
+            BattleMusic=nullptr;
+        }
         UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);
+    }
 }

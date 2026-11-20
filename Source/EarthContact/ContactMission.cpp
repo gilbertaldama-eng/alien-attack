@@ -1202,7 +1202,18 @@ void AContactMode::Tick(float Delta)
         }
         else if (State->IntroStage>=4 && State->IntroStage<=6)
         {
-            TickAbduction(Delta,Since);
+            if (!AbductorSaucer && Since>4.f)
+            {
+                // Missing models or failed actor spawn must never soft-lock a
+                // mission. Keep dog alive in memory; advance to rescue combat.
+                if (StoryDog) StoryDog->SetActorHiddenInGame(true);
+                State->bDogTaken=true;
+                Player->BeginRescueMode();
+                SpawnStoryGreys();
+                SetIntroStage(7);
+                UE_LOG(LogTemp,Error,TEXT("ABDUCTION UFO spawn failed: emergency rescue transition"));
+            }
+            else TickAbduction(Delta,Since);
         }
     }
     int32 Allies=0,Raiders=0;
@@ -1221,7 +1232,8 @@ void AContactMode::Tick(float Delta)
     if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
-    else if (State->bHunt && State->IntroStage==7 && Raiders==0 && !State->bBossSpawned)
+    else if (State->bHunt && State->IntroStage==7 && bReinforcementsSpawned &&
+             Raiders==0 && !State->bBossSpawned)
     {
         const FVector BossStart(350,1050,140);
         FActorSpawnParameters SpawnOptions;

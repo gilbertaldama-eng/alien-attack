@@ -342,6 +342,24 @@ AContactResponder::AContactResponder()
     FirstPersonPistol->SetOnlyOwnerSee(true);
     FirstPersonPistol->SetCastShadow(false);
     FirstPersonPistol->SetVisibility(false);
+    if (!PistolModel && Shape)
+    {
+        // The view pistol must look like a handgun, not the old single box.
+        auto AddViewDetail=[&](const TCHAR* Name,FVector Offset,FVector Scale)
+        {
+            UStaticMeshComponent* Detail=CreateDefaultSubobject<UStaticMeshComponent>(Name);
+            Detail->SetupAttachment(FirstPersonPistol);
+            Detail->SetStaticMesh(Shape);
+            Detail->SetRelativeLocation(Offset);
+            Detail->SetRelativeScale3D(Scale);
+            Detail->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            Detail->SetOnlyOwnerSee(true);
+            Detail->SetCastShadow(false);
+        };
+        AddViewDetail(TEXT("ViewPistolGrip"),FVector(-1,-13,-11),FVector(.09f,.085f,.24f));
+        AddViewDetail(TEXT("ViewPistolSight"),FVector(0,20,9),FVector(.042f,.025f,.035f));
+        AddViewDetail(TEXT("ViewPistolGuard"),FVector(0,-2,-7),FVector(.045f,.09f,.026f));
+    }
 }
 
 void AContactResponder::BeginPlay()
@@ -846,7 +864,11 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player fired ammo=%d position=%s"),Ammo,*GetActorLocation().ToCompactString());
     const double Now=GetWorld()->GetTimeSeconds();
     NextShot=Now+(Scatter ? FMath::FRandRange(.7f,1.45) : (bPistol ? .30f : .13f));
-    const FVector From=GetActorLocation()+FVector(0,0,45)+GetActorForwardVector()*38;
+    // In Solo Hunt use the eye-level aim ray to prevent shooting below
+    // the crosshair at close range. Third-person and AI keep old geometry.
+    const FVector From=(!IsTrooper() && bFirstPersonExperience && FirstPersonCamera)
+        ? FirstPersonCamera->GetComponentLocation()
+        : GetActorLocation()+FVector(0,0,45)+GetActorForwardVector()*38;
     FVector Dir=(Aim-From).GetSafeNormal();
     if (Scatter) Dir=FMath::VRandCone(Dir,FMath::DegreesToRadians(2.4f));
     FHitResult Hit;
@@ -855,7 +877,15 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     if (Hit.bBlockingHit) End=Hit.ImpactPoint;
     if (auto* Victim=Cast<AContactResponder>(Hit.GetActor()); Victim && Victim->bAlien!=bAlien)
         Victim->ReceiveHit(Scatter ? 9 : (bPistol ? 38 : 26),this);
-    ShotFX(bPistol && !IsTrooper() ? Sidearm->GetComponentLocation() : Gun->GetComponentTransform().TransformPosition(FVector(0,51,9)),End,Hit.bBlockingHit);
+    FVector Muzzle=bPistol && !IsTrooper()
+        ? Sidearm->GetComponentLocation()
+        : Gun->GetComponentTransform().TransformPosition(FVector(0,51,9));
+    if (!IsTrooper() && bFirstPersonExperience && FirstPersonCamera)
+    {
+        const FTransform View=FirstPersonCamera->GetComponentTransform();
+        Muzzle=View.TransformPosition(FVector(45,14,-17));
+    }
+    ShotFX(Muzzle,End,Hit.bBlockingHit);
 }
 
 void AContactResponder::ShotFX_Implementation(FVector_NetQuantize From,FVector_NetQuantize To,bool Hit)

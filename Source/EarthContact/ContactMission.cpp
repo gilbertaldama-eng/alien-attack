@@ -77,6 +77,36 @@ namespace
     }
 
 
+    // Original eerie command tone; generated locally, no sample downloads.
+    // The workers hear the same pulse at their synchronized order boundary.
+    void PlayVisitorCommandTone(UObject* Context,const FVector& Where)
+    {
+        constexpr int32 Rate=22050;
+        constexpr float Duration=.64f;
+        constexpr int32 Count=14112;
+        USoundWaveProcedural* Cue=NewObject<USoundWaveProcedural>(Context);
+        if (!Cue) return;
+        Cue->NumChannels=1;
+        Cue->SetSampleRate(Rate);
+        Cue->SampleByteSize=sizeof(int16);
+        Cue->Duration=Duration;
+        Cue->bLooping=false;
+        TArray<int16> PCM;
+        PCM.SetNumUninitialized(Count);
+        for (int32 I=0;I<Count;++I)
+        {
+            const float T=float(I)/Rate;
+            const float Env=FMath::Sin(PI*FMath::Clamp(T/Duration,0.f,1.f));
+            const float Frequency=80.f+15.f*FMath::Sin(2.f*PI*T*3.f);
+            const float Wave=Env*(.58f*FMath::Sin(2.f*PI*Frequency*T)
+                +.27f*FMath::Sin(2.f*PI*(Frequency*1.503f)*T));
+            PCM[I]=int16(FMath::Clamp(Wave,-.95f,.95f)*17500.f);
+        }
+        Cue->QueueAudio(reinterpret_cast<const uint8*>(PCM.GetData()),
+                        PCM.Num()*sizeof(int16));
+        UGameplayStatics::PlaySoundAtLocation(Context,Cue,Where,.23f);
+    }
+
     // Fast, native Unreal geometry for genuinely non-human silhouettes.
     // Each primitive is decorative only; the character capsule supplies collision.
     void BuildAlienVisual(AContactResponder* Unit, bool Nordic)
@@ -536,6 +566,10 @@ void AContactResponder::Think(double Now)
                 GreyDirective=(Order<0) ? Slot%3 : (Order+Slot%3)%3;
                 NextServoStep=Now+.14*(Slot%3);
                 GreyPauseUntil=FMath::Max(GreyPauseUntil,Now+(Order<0 ? .15 : .55));
+                // One acoustic command per synchronized broadcast, rather
+                // than eight overlapping sounds from the worker swarm.
+                if (Overlord && Slot==0)
+                    PlayVisitorCommandTone(this,Overlord->GetActorLocation());
                 UE_LOG(LogTemp,Display,TEXT("GREY UNIT %d directive=%d overlord=%d"),
                     Slot,GreyDirective,Overlord?1:0);
             }

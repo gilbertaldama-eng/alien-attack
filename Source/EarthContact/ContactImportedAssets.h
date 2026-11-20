@@ -56,6 +56,12 @@ namespace ContactAssets
         else UE_LOG(LogTemp,Warning,TEXT("CONTACT ASSET no model in %s with token %s"),Folder,Token?Token:TEXT("(any)"));
         return nullptr;
     }
+    inline USkeletalMesh* Dog()
+    {
+        if (auto* Asset=Cast<USkeletalMesh>(Configured(TEXT("Dog"),true))) return Asset;
+        if (auto* Mesh=Cast<USkeletalMesh>(FindSingle(TEXT("/Game/Characters/Dog"),TEXT(""),true))) return Mesh;
+        return Cast<USkeletalMesh>(FindSingle(TEXT("/Game/Animals/Dogs"),TEXT(""),true));
+    }
     inline USkeletalMesh* Grey()
     {
         if (auto* Asset=Cast<USkeletalMesh>(Configured(TEXT("Grey"),true))) return Asset;

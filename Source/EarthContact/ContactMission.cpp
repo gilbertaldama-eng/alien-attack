@@ -303,6 +303,21 @@ void AContactResponder::BeginSoloHuntWithPistol()
     UE_LOG(LogTemp,Display,TEXT("INTRO starter pistol equipped, rounds=%d"),Ammo);
 }
 
+void AContactResponder::BeginRescueMode()
+{
+    if (!HasAuthority()) return;
+    // The dog is alive but missing. Equip the existing rifle; preserve ammo.
+    // This is an emotional combat transition, not an invulnerability cheat.
+    if (bPistol) PistolAmmo=Ammo;
+    bPistol=false;
+    Ammo=RifleAmmo;
+    bReloading=false;
+    bTrigger=false;
+    Gun->SetVisibility(true,true);
+    Sidearm->SetVisibility(false,true);
+    UE_LOG(LogTemp,Warning,TEXT("RESCUE MODE armed: dog taken, rifle ready"));
+}
+
 void AContactResponder::AssignPost(bool Alien, int32 Index)
 {
     Slot = Index;
@@ -591,9 +606,9 @@ void AContactResponder::Tick(float Delta)
     if (IsTrooper())
     {
         if (GetWorld()->GetGameState<AContactState>()->bHunt &&
-            GetWorld()->GetGameState<AContactState>()->IntroStage < 5)
+            GetWorld()->GetGameState<AContactState>()->IntroStage < 7)
         {
-            if (GetWorld()->GetGameState<AContactState>()->IntroStage==4)
+            if (GetWorld()->GetGameState<AContactState>()->IntroStage==7)
             {
                 // Uncanny pursuit tableau: greys converge on the same crash corridor as the dog.
                 // A properly animated skeletal chase is a later asset/AI milestone.
@@ -806,6 +821,11 @@ void AContactMode::StartPlay()
         bCrashImpactPlayed=false;
         FallingSaucer=nullptr;
         SaucerVisual=nullptr;
+        AbductorSaucer=nullptr;
+        AbductorBeam=nullptr;
+        AbductorGlow=nullptr;
+        bReinforcementsSpawned=false;
+        State->bDogTaken=false;
         // Start the player in a short, fake military-shooter vignette.
         // The HUD shows an original arcade parody until the dog interrupts.
         // Temporary in-engine dog silhouette: a production quadruped model/rig is still needed.
@@ -960,6 +980,134 @@ void AContactMode::SetIntroStage(int32 NewStage)
     }
 }
 
+void AContactMode::StartAbductor()
+{
+    if (!GetWorld() || AbductorSaucer) return;
+    UStaticMesh* Craft=ContactAssets::IntactUFO();
+    if (!Craft) Craft=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder"));
+    if (!Craft) { UE_LOG(LogTemp,Error,TEXT("ABDUCTION no UFO mesh available")); return; }
+    const FVector DogWhere=StoryDog ? StoryDog->GetActorLocation() : StoryDogDestination;
+    DogBeamStart=DogWhere;
+    const FVector Entry=DogWhere+FVector(-1750,1350,2100);
+    AbductorSaucer=GetWorld()->SpawnActor<AActor>(AActor::StaticClass(),Entry,FRotator::ZeroRotator);
+    if (!AbductorSaucer) return;
+    USceneComponent* Root=NewObject<USceneComponent>(AbductorSaucer,TEXT("AbductorRoot"));
+    AbductorSaucer->SetRootComponent(Root);
+    Root->RegisterComponent();
+    UStaticMeshComponent* Hull=NewObject<UStaticMeshComponent>(AbductorSaucer,TEXT("AbductorHull"));
+    Hull->SetupAttachment(Root);
+    Hull->SetStaticMesh(Craft);
+    Hull->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    const float Width=FMath::Max(1.f,2.f*FMath::Max(Craft->GetBounds().BoxExtent.X,Craft->GetBounds().BoxExtent.Y));
+    Hull->SetRelativeScale3D(FVector(1050.f/Width));
+    Hull->RegisterComponent();
+    AbductorBeam=NewObject<UStaticMeshComponent>(AbductorSaucer,TEXT("TractorBeam"));
+    AbductorBeam->SetupAttachment(Root);
+    AbductorBeam->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder")));
+    AbductorBeam->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    AbductorBeam->SetVisibility(false);
+    AbductorBeam->SetCastShadow(false);
+    if (UMaterialInterface* Base=LoadObject<UMaterialInterface>(nullptr,
+        TEXT("/Engine/BasicShapes/BasicShapeMaterial")))
+    {
+        if (UMaterialInstanceDynamic* BeamMat=UMaterialInstanceDynamic::Create(Base,AbductorSaucer))
+        {
+            BeamMat->SetVectorParameterValue(TEXT("Color"),FLinearColor(.10f,.85f,1.f));
+            AbductorBeam->SetMaterial(0,BeamMat);
+        }
+    }
+    AbductorBeam->RegisterComponent();
+    AbductorGlow=NewObject<UPointLightComponent>(AbductorSaucer,TEXT("TractorGlow"));
+    AbductorGlow->SetupAttachment(Root);
+    AbductorGlow->SetLightColor(FLinearColor(.14f,.78f,1.f));
+    AbductorGlow->SetIntensity(11000.f);
+    AbductorGlow->SetAttenuationRadius(1800.f);
+    AbductorGlow->RegisterComponent();
+    AbductorSaucer->SetActorLocation(Entry);
+    UE_LOG(LogTemp,Warning,TEXT("ABDUCTION second UFO appeared at %s"),*Entry.ToCompactString());
+}
+
+void AContactMode::TickAbduction(float Delta,double Since)
+{
+    if (!AbductorSaucer || !StoryDog) return;
+    const FVector BeamCenter=DogBeamStart+FVector(0,0,1050);
+    if (auto* State=GetGameState<AContactState>())
+    {
+        if (State->IntroStage==4)
+        {
+            // Second spacecraft sweeps in while the dog waits in the crater.
+            const float T=FMath::Clamp(float(Since/3.2),0.f,1.f);
+            const float Ease=T*T*(3.f-2.f*T);
+            const FVector Entry=DogBeamStart+FVector(-1750,1350,2100);
+            AbductorSaucer->SetActorLocation(FMath::Lerp(Entry,BeamCenter,Ease));
+            AbductorSaucer->SetActorRotation(FRotator(0,75.f+T*220.f,0));
+            if (T>=1.f) SetIntroStage(5);
+        }
+        else if (State->IntroStage==5)
+        {
+            // The beam connects ship to dog, then physically lifts dog up.
+            if (AbductorBeam)
+            {
+                AbductorBeam->SetVisibility(true);
+                const FVector Ship=AbductorSaucer->GetActorLocation();
+                const FVector Dog=StoryDog->GetActorLocation();
+                const FVector Mid=(Ship+Dog)*.5;
+                const float Length=FVector::Distance(Ship,Dog);
+                // Engine cylinder height is 200 cm, aligned on local Z.
+                AbductorBeam->SetRelativeLocation(AbductorSaucer->GetActorTransform().InverseTransformPosition(Mid));
+                AbductorBeam->SetRelativeScale3D(FVector(2.0f,2.0f,Length/200.f));
+            }
+            const float T=FMath::Clamp(float(Since/3.4),0.f,1.f);
+            StoryDog->SetActorLocation(DogBeamStart+FVector(0,0,860*T*T));
+            StoryDog->AddActorWorldRotation(FRotator(0,Delta*90.f,0));
+            if (T>=1.f)
+            {
+                StoryDog->SetActorHiddenInGame(true);
+                State->bDogTaken=true;
+                SetIntroStage(6);
+                if (auto* Pawn=Cast<AContactResponder>(
+                    UGameplayStatics::GetPlayerPawn(this,0))) Pawn->BeginRescueMode();
+                UE_LOG(LogTemp,Warning,TEXT("ABDUCTION DOG TAKEN - rescue objective active"));
+            }
+        }
+        else if (State->IntroStage==6)
+        {
+            if (AbductorBeam) AbductorBeam->SetVisibility(false);
+            const float T=FMath::Clamp(float(Since/3.0),0.f,1.f);
+            AbductorSaucer->SetActorLocation(BeamCenter+FVector(
+                -1300.f*T,1150.f*T,3300.f*T*T));
+            AbductorSaucer->SetActorRotation(FRotator(-18.f*T,290.f+T*240.f,10.f*T));
+            if (T>=1.f)
+            {
+                AbductorSaucer->SetActorHiddenInGame(true);
+                AbductorSaucer->SetActorEnableCollision(false);
+                SpawnStoryGreys();
+                SetIntroStage(7);
+            }
+        }
+    }
+}
+
+void AContactMode::SpawnReinforcements()
+{
+    if (bReinforcementsSpawned || !GetWorld()) return;
+    bReinforcementsSpawned=true;
+    FActorSpawnParameters Params;
+    Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    int32 Count=0;
+    for (int32 I=0;I<3;++I)
+    {
+        const FVector Where(2700.f+I*240.f,-3300.f+I*130.f,105.f);
+        if (AContactResponder* Grey=GetWorld()->SpawnActor<AContactResponder>(
+            AContactResponder::StaticClass(),Where,FRotator(0,90,0),Params))
+        {
+            Grey->AssignHunter(I+5);
+            ++Count;
+        }
+    }
+    UE_LOG(LogTemp,Warning,TEXT("ABDUCTION phase 4 reinforcements=%d"),Count);
+}
+
 void AContactMode::SpawnStoryGreys()
 {
     auto* State=GetGameState<AContactState>();
@@ -988,7 +1136,7 @@ void AContactMode::Tick(float Delta)
     if (!State || State->Result!=EContactResult::Active) return;
     auto* Player=Cast<AContactResponder>(UGameplayStatics::GetPlayerPawn(this,0));
     if (!Player) return;
-    if (State->bHunt && State->IntroStage<5 && State->Result==EContactResult::Active)
+    if (State->bHunt && State->IntroStage<7 && State->Result==EContactResult::Active)
     {
         const double Since=GetWorld()->GetTimeSeconds()-IntroStageStarted;
         const FVector Crash(3600,-2600,100);
@@ -1039,16 +1187,22 @@ void AContactMode::Tick(float Delta)
                     StoryDog->SetActorRotation(Step.Rotation());
                 }
             }
-            if (FVector::Dist2D(Player->GetActorLocation(),Crash)<4400 || Since>36)
+            // The abduction starts when the dog reaches the ship, not just
+            // because the player wandered near the crash too early.
+            if (!StoryDog || FVector::Dist2D(StoryDog->GetActorLocation(),StoryDogDestination)<180 || Since>20)
             {
-                SpawnStoryGreys();
+                if (StoryDog)
+                {
+                    StoryDog->SetActorLocation(StoryDogDestination);
+                    DogBeamStart=StoryDogDestination;
+                }
+                StartAbductor();
                 SetIntroStage(4);
             }
         }
-        else if (State->IntroStage==4)
+        else if (State->IntroStage>=4 && State->IntroStage<=6)
         {
-            if (FVector::Dist2D(Player->GetActorLocation(),Crash)<2100)
-                SetIntroStage(5);
+            TickAbduction(Delta,Since);
         }
     }
     int32 Allies=0,Raiders=0;
@@ -1056,10 +1210,18 @@ void AContactMode::Tick(float Delta)
         if (It->IsTrooper() && It->Health>0) { if(It->IsAlien()) ++Raiders; else ++Allies; }
     State->Allies=Allies;
     State->Raiders=Raiders;
+    // Phase-four pressure: first wave is already present, three more arrive
+    // once the player has had a few seconds to register the loss.
+    if (State->bHunt && State->IntroStage==7 && !bReinforcementsSpawned &&
+        GetWorld()->GetTimeSeconds()-IntroStageStarted>=4.)
+    {
+        SpawnReinforcements();
+        return; // re-count living raiders next tick before boss checks
+    }
     if (!State->bHunt && FVector::Dist2D(Player->GetActorLocation(),FVector::ZeroVector)<400 && Player->Health)
         State->Uplink=FMath::Min(10.f,State->Uplink+Delta);
     if (!Player->Health) State->Result=EContactResult::Lost;
-    else if (State->bHunt && State->IntroStage==5 && Raiders==0 && !State->bBossSpawned)
+    else if (State->bHunt && State->IntroStage==7 && Raiders==0 && !State->bBossSpawned)
     {
         const FVector BossStart(350,1050,140);
         FActorSpawnParameters SpawnOptions;
@@ -1072,7 +1234,7 @@ void AContactMode::Tick(float Delta)
         }
         else UE_LOG(LogTemp,Error,TEXT("NORDIC BOSS spawn failed; mission remains active"));
     }
-    else if (State->bHunt ? (State->IntroStage==5 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
+    else if (State->bHunt ? (State->IntroStage==7 && State->bBossDefeated) : (Raiders==0 || State->Uplink>=10))
         State->Result=EContactResult::Won;
     if (State->Result!=EContactResult::Active)
         UE_LOG(LogTemp,Display,TEXT("BATTLE end result=%d allies=%d raiders=%d uplink=%.1f"),int32(State->Result),Allies,Raiders,State->Uplink);

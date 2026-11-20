@@ -17,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundWaveProcedural.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Camera/PlayerCameraManager.h"
 #include "DrawDebugHelpers.h"
@@ -27,6 +28,52 @@
 
 namespace
 {
+    // Original, generated sound cues; no external recordings or licensing needed.
+    // The bark is stylized and can later be replaced by a real dog recording.
+    void PlayIntroSound(UObject* Context,const FVector& Where,bool bBark)
+    {
+        constexpr int32 Rate=22050;
+        const float Duration=bBark ? .36f : 1.25f;
+        const int32 Count=FMath::CeilToInt(Rate*Duration);
+        USoundWaveProcedural* Sound=NewObject<USoundWaveProcedural>(Context);
+        if (!Sound) return;
+        Sound->NumChannels=1;
+        Sound->SetSampleRate(Rate);
+        Sound->SampleByteSize=sizeof(int16);
+        Sound->Duration=Duration;
+        Sound->bLooping=false;
+        TArray<int16> PCM;
+        PCM.SetNumUninitialized(Count);
+        FRandomStream Random(bBark ? 1822 : 1947);
+        float Filtered=0.f;
+        for (int32 I=0;I<Count;++I)
+        {
+            const float T=float(I)/Rate;
+            const float Noise=Random.FRandRange(-1.f,1.f);
+            Filtered=.96f*Filtered+.04f*Noise;
+            float Wave=0.f;
+            if (bBark)
+            {
+                // Two rough exhalation pulses with a downward-pitched throat tone.
+                const float P1=FMath::Exp(-FMath::Abs(T-.075f)*19.f);
+                const float P2=.64f*FMath::Exp(-FMath::Abs(T-.205f)*24.f);
+                const float Envelope=(P1+P2)*FMath::Clamp(T/.022f,0.f,1.f);
+                const float Throat=FMath::Sin(2.f*PI*(185.f*T-90.f*T*T));
+                Wave=Envelope*(.52f*Throat+.40f*Noise+.10f*Filtered);
+            }
+            else
+            {
+                const float Envelope=FMath::Clamp(T/.025f,0.f,1.f)*FMath::Exp(-T*2.7f);
+                const float Low=FMath::Sin(2.f*PI*(66.f*T-21.f*T*T));
+                Wave=Envelope*(.62f*Low+.60f*Filtered+.24f*Noise);
+            }
+            PCM[I]=int16(FMath::Clamp(Wave,-.96f,.96f)*28000.f);
+        }
+        Sound->QueueAudio(reinterpret_cast<const uint8*>(PCM.GetData()),
+                          PCM.Num()*sizeof(int16));
+        UGameplayStatics::PlaySoundAtLocation(Context,Sound,Where);
+    }
+
 
     // Fast, native Unreal geometry for genuinely non-human silhouettes.
     // Each primitive is decorative only; the character capsule supplies collision.
@@ -825,6 +872,7 @@ void AContactMode::StartFallingSaucer()
     const float Width=FMath::Max(1.f,2.f*FMath::Max(Extent.X,Extent.Y));
     SaucerVisual->SetRelativeScale3D(FVector(1300.f/Width));
     SaucerVisual->RegisterComponent();
+    FallingSaucer->SetActorLocation(SaucerFrom);
     UE_LOG(LogTemp,Display,TEXT("INTRO falling UFO spawned mesh=%s"),*Ship->GetPathName());
 }
 
@@ -848,6 +896,8 @@ void AContactMode::PlayCrashImpact()
         FallingSaucer->SetActorLocation(SaucerImpact);
         FallingSaucer->SetActorRotation(FRotator(17,32,14));
     }
+    // Generated low-frequency impact sound, no external downloads required.
+    PlayIntroSound(this,SaucerImpact,false);
     // A short-lived light and radial physical debris mark the impact.
     if (APointLight* Flash=GetWorld()->SpawnActor<APointLight>(
         SaucerImpact+FVector(0,0,240),FRotator::ZeroRotator))
@@ -860,7 +910,18 @@ void AContactMode::PlayCrashImpact()
         }
         Flash->SetLifeSpan(1.2f);
     }
-    // Camera shake is mild so the intro doesn't override player control.
+    // Persistent cold wreck light turns on only after actual impact.
+    if (APointLight* GlowActor=GetWorld()->SpawnActor<APointLight>(
+        SaucerImpact+FVector(0,0,140),FRotator::ZeroRotator))
+    {
+        if (UPointLightComponent* Glow=GlowActor->PointLightComponent.Get())
+        {
+            Glow->SetIntensity(3300.f);
+            Glow->SetAttenuationRadius(1150.f);
+            Glow->SetLightColor(FLinearColor(.18f,.64f,1.f));
+        }
+    }
+    // Camera flash is mild so the intro doesn't override player control.
     if (APlayerController* PC=UGameplayStatics::GetPlayerController(this,0))
         if (PC->PlayerCameraManager)
             PC->PlayerCameraManager->StartCameraFade(0.f,.18f,.05f,
@@ -913,6 +974,17 @@ void AContactMode::Tick(float Delta)
         const double Since=GetWorld()->GetTimeSeconds()-IntroStageStarted;
         const FVector Crash(3600,-2600,100);
         if (State->IntroStage==0 && Since>=7.0) SetIntroStage(1);
+        if (State->IntroStage==1 && GetWorld()->GetTimeSeconds()-LastBarkAt>.78)
+        {
+            LastBarkAt=GetWorld()->GetTimeSeconds();
+            if (StoryDog)
+            {
+                PlayIntroSound(this,StoryDog->GetActorLocation(),true);
+                // Small readable barking motion before the dog's chase.
+                StoryDog->SetActorRotation(FRotator(
+                    0,25.f*FMath::Sin(float(Since)*5.f),0));
+            }
+        }
         else if (State->IntroStage==1 && Since>=4.0) SetIntroStage(2);
         else if (State->IntroStage==2)
         {

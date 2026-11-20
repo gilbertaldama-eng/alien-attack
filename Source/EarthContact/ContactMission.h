@@ -39,6 +39,7 @@ public:
     void Tick(float Delta) override;
     void SetupPlayerInputComponent(UInputComponent* Input) override;
     void AssignPost(bool Alien, int32 Index);
+    void BeginSoloHuntWithPistol();
     void AssignHunter(int32 Index);
     void AssignNordicBoss();
     void TeleportFlash(bool bArrival);

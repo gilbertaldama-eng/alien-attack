@@ -56,6 +56,57 @@ namespace ContactAssets
         else UE_LOG(LogTemp,Warning,TEXT("CONTACT ASSET no model in %s with token %s"),Folder,Token?Token:TEXT("(any)"));
         return nullptr;
     }
+    // Optional FREE pack content already installed by the owner. These
+    // names are suggestions, NOT hard dependencies or marketplace downloads.
+    // Prefer explicit config paths; otherwise search only known content roots,
+    // selecting a deterministic first mesh with a meaningful category token.
+    inline UStaticMesh* EnvironmentMesh(const TCHAR* Role,
+                                        const TArray<FString>& RequiredTokens)
+    {
+        if (UStaticMesh* Exact=Cast<UStaticMesh>(Configured(Role,false)))
+            return Exact;
+        FAssetRegistryModule& Module=FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
+            TEXT("AssetRegistry"));
+        const TCHAR* Roots[]={
+            TEXT("/Game/Megascans/3D_Assets"),
+            TEXT("/Game/Megascans"),
+            TEXT("/Game/EarthContact/Environment"),
+            TEXT("/Game/Environment"),
+            TEXT("/Game/CitySampleVehicles")
+        };
+        for (const TCHAR* Root:Roots)
+        {
+            TArray<FAssetData> Candidates;
+            Module.Get().GetAssetsByPath(FName(Root),Candidates,true);
+            TArray<FAssetData> Matches;
+            for (const FAssetData& Entry:Candidates)
+            {
+                if (Entry.AssetClassPath.GetAssetName()!=TEXT("StaticMesh")) continue;
+                const FString Name=Entry.AssetName.ToString().ToLower();
+                for (const FString& Token:RequiredTokens)
+                {
+                    if (Name.Contains(Token))
+                    {
+                        Matches.Add(Entry);
+                        break;
+                    }
+                }
+            }
+            if (!Matches.IsEmpty())
+            {
+                Matches.Sort([](const FAssetData& A,const FAssetData& B)
+                {
+                    return A.GetObjectPathString()<B.GetObjectPathString();
+                });
+                UE_LOG(LogTemp,Display,TEXT("FREE ASSET role=%s root=%s selected=%s candidates=%d"),
+                    Role,Root,*Matches[0].GetObjectPathString(),Matches.Num());
+                return Cast<UStaticMesh>(Matches[0].GetAsset());
+            }
+        }
+        UE_LOG(LogTemp,Display,TEXT("FREE ASSET role=%s unavailable; no pack assumed installed"),Role);
+        return nullptr;
+    }
+
     inline USkeletalMesh* Dog()
     {
         if (auto* Asset=Cast<USkeletalMesh>(Configured(TEXT("Dog"),true))) return Asset;

@@ -814,6 +814,23 @@ void AContactMode::StartPlay()
             auto* DogRoot=NewObject<USceneComponent>(StoryDog,TEXT("StoryDogRoot"));
             StoryDog->SetRootComponent(DogRoot);
             DogRoot->RegisterComponent();
+            StoryDog->SetActorLocation(FVector(-1630,-1650,75));
+            // A real skeletal dog is preferred over the placeholder body.
+            if (USkeletalMesh* DogAsset=ContactAssets::Dog())
+            {
+                USkeletalMeshComponent* DogMesh=NewObject<USkeletalMeshComponent>(
+                    StoryDog,TEXT("ImportedDogMesh"));
+                DogMesh->SetupAttachment(DogRoot);
+                DogMesh->SetSkeletalMesh(DogAsset);
+                DogMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                DogMesh->SetRelativeRotation(FRotator(0,-90,0));
+                const float Height=FMath::Max(1.f,DogAsset->GetBounds().BoxExtent.Z*2.f);
+                DogMesh->SetRelativeScale3D(FVector(65.f/Height));
+                DogMesh->RegisterComponent();
+                UE_LOG(LogTemp,Display,TEXT("INTRO real dog model loaded: %s"),*DogAsset->GetPathName());
+            }
+            else
+            {
             auto AddPart=[&](const TCHAR* Name,FVector Offset,FVector Scale)
             {
                 auto* Mesh=NewObject<UStaticMeshComponent>(StoryDog,Name);
@@ -834,6 +851,7 @@ void AContactMode::StartPlay()
                 AddPart(S<0?TEXT("DogEarL"):TEXT("DogEarR"),FVector(35,S*15,60),FVector(.1f,.07f,.16f));
             }
             AddPart(TEXT("DogTail"),FVector(-54,0,48),FVector(.25f,.06f,.06f));
+            } // fallback geometry only when no imported dog asset exists
         }
         UE_LOG(LogTemp,Display,TEXT("INTRO home staged; dog=%s"),StoryDog?TEXT("spawned"):TEXT("missing"));
         return;

@@ -8,6 +8,8 @@
 
 class UAnimSequence;
 class USoundBase;
+class UPointLightComponent;
+class UStaticMeshComponent;
 
 UENUM()
 enum class EContactResult : uint8 { Active, Won, Lost };

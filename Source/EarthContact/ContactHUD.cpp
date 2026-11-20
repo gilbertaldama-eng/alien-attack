@@ -57,12 +57,21 @@ void AContactHUD::DrawHUD()
     DrawRect(Gold,20,20,4,94);
     DrawText(State->bHunt ? TEXT("EARTHCONTACT  /  DESERT ENCOUNTER") : TEXT("ROSWELL  /  SIGNAL STATION"),Gold,37,29);
     const TCHAR* IntroPrompt=State->IntroStage==2 ? TEXT("SOMETHING IS FALLING FROM THE SKY") :
-        State->IntroStage==3 ? TEXT("THE SHIP HAS CRASHED  /  YOUR DOG IS RUNNING") :
-        State->IntroStage==4 ? TEXT("THOSE ARE NOT PEOPLE  /  FOLLOW THE DOG") : nullptr;
+        State->IntroStage==3 ? TEXT("THE SHIP HAS CRASHED  /  FOLLOW YOUR DOG") :
+        State->IntroStage==4 ? TEXT("ANOTHER UFO  /  IT IS FOLLOWING YOUR DOG!") :
+        State->IntroStage==5 ? TEXT("TRACTOR BEAM!  /  THEY ARE TAKING YOUR DOG!") :
+        State->IntroStage==6 ? TEXT("DOG ABDUCTED  /  RESCUE HIM") : nullptr;
     DrawText(State->bHunt ? (IntroPrompt ? IntroPrompt :
-        (State->bBossSpawned ? TEXT("MONSTER LEADER  /  SURVIVE") : TEXT("THE GREYS  /  SURVIVE THE ENCOUNTER"))) :
+        (State->bBossSpawned ? TEXT("MONSTER LEADER  /  FIND YOUR DOG") : State->bDogTaken ?
+            TEXT("THEY TOOK YOUR DOG  /  FIGHT THROUGH THE GREYS") : TEXT("THE GREYS  /  SURVIVE"))) :
         TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
-    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->IntroStage<5 ? TEXT("PROLOGUE") : State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
+    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->IntroStage<7 ? TEXT("PROLOGUE") : State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
+    if (State->bHunt && State->bDogTaken)
+    {
+        DrawRect(FLinearColor(.13f,.025f,.025f,.90f),W*.5f-240,24,480,52);
+        DrawText(TEXT("RESCUE OBJECTIVE: FIND YOUR DOG"),
+            FLinearColor(1.f,.82f,.50f),W*.5f-210,36,nullptr,1.15f);
+    }
     DrawRect(Ink,20,H-86,258,66);
     DrawText(FString::Printf(TEXT("HP  %03d"),Player->Health),Ally,36,H-78,nullptr,1.45);
     DrawText(Player->bReloading ? TEXT("RELOADING") : FString::Printf(TEXT("%s  %02d / %d"),Player->bPistol ? TEXT("PISTOL") : TEXT("RIFLE"),Player->Ammo,Player->bPistol ? 17 : 30),Gold,130,H-77);

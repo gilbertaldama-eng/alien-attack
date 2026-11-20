@@ -9,6 +9,7 @@
 class UAnimSequence;
 class USoundBase;
 class UPointLightComponent;
+class UAudioComponent;
 class UStaticMeshComponent;
 
 UENUM()
@@ -95,6 +96,11 @@ private:
     double GreyPauseUntil = 0;
     bool bGreyReachPending = false;
     bool bGreyFlankLeft = false;
+    // Deterministic worker roles assigned by index. Not independent thinkers.
+    int32 GreyDirective = 0;
+    int32 LastOverlordOrder = -1;
+    double NextServoStep = 0;
+    double ServoHoldUntil = 0;
     double BrainControlledUntil = 0;
     double NextMindAttack = 0;
     bool bTrigger = false;
@@ -141,6 +147,8 @@ private:
     double LastBarkAt=0;
     void StartFallingSaucer();
     void PlayCrashImpact();
+    UPROPERTY() TObjectPtr<UAudioComponent> BattleMusic;
+    void StartBattleMusic();
     FVector StoryDogDestination = FVector(3200,-2550,120);
     void SetIntroStage(int32 NewStage);
     void SpawnStoryGreys();

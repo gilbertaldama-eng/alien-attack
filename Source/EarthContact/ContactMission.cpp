@@ -311,15 +311,64 @@ AContactResponder::AContactResponder()
     Boom->TargetArmLength = 250;
     Boom->SocketOffset = {0,58,12};
     Boom->bUsePawnControlRotation = true;
-    auto* Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
-    Camera->SetupAttachment(Boom, USpringArmComponent::SocketName);
+    ThirdPersonCamera=CreateDefaultSubobject<UCameraComponent>(TEXT("RelayCamera"));
+    ThirdPersonCamera->SetupAttachment(Boom,USpringArmComponent::SocketName);
+    FirstPersonCamera=CreateDefaultSubobject<UCameraComponent>(TEXT("SoloFirstPersonCamera"));
+    FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
+    FirstPersonCamera->SetRelativeLocation(FVector(0,0,68.f));
+    FirstPersonCamera->bUsePawnControlRotation=true;
+    FirstPersonCamera->SetFieldOfView(92.f);
+    FirstPersonCamera->SetActive(false);
+    // View weapons live in camera space so pitching up/down doesn't reveal a
+    // third-person weapon dangling from the mannequin's hand.
+    FirstPersonRifle=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ViewRifle"));
+    FirstPersonRifle->SetupAttachment(FirstPersonCamera);
+    FirstPersonRifle->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,
+        TEXT("/Game/Weapons/Rifle/Meshes/SM_Rifle")));
+    FirstPersonRifle->SetRelativeLocation(FVector(44.f,18.f,-21.f));
+    FirstPersonRifle->SetRelativeRotation(FRotator(0,-90.f,0));
+    FirstPersonRifle->SetRelativeScale3D(FVector(.78f));
+    FirstPersonRifle->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    FirstPersonRifle->SetOnlyOwnerSee(true);
+    FirstPersonRifle->SetCastShadow(false);
+    FirstPersonRifle->SetVisibility(false);
+    FirstPersonPistol=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ViewPistol"));
+    FirstPersonPistol->SetupAttachment(FirstPersonCamera);
+    FirstPersonPistol->SetStaticMesh(PistolModel ? PistolModel : Shape);
+    FirstPersonPistol->SetRelativeLocation(FVector(40.f,15.f,-18.f));
+    FirstPersonPistol->SetRelativeRotation(FRotator(0,-90.f,0));
+    FirstPersonPistol->SetRelativeScale3D(PistolModel ? FVector(.72f) : FVector(.15f,.34f,.16f));
+    FirstPersonPistol->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    FirstPersonPistol->SetOnlyOwnerSee(true);
+    FirstPersonPistol->SetCastShadow(false);
+    FirstPersonPistol->SetVisibility(false);
 }
 
 void AContactResponder::BeginPlay()
 {
     Super::BeginPlay();
+    // Keep relay's prior over-the-shoulder camera; Solo Hunt switches at spawn.
     Animate(false);
 }
+void AContactResponder::UpdateFirstPerson(float Delta)
+{
+    if (!bFirstPersonExperience || !FirstPersonCamera) return;
+    const float Speed=GetVelocity().Size2D();
+    const bool bMoving=Speed>20.f && GetCharacterMovement()->IsMovingOnGround();
+    FirstPersonStride+=Delta*(bMoving ? FMath::Clamp(Speed/75.f,3.f,10.f) : 0.f);
+    const float Blend=FMath::Clamp(Speed/450.f,0.f,1.f);
+    const float BobZ=bMoving ? FMath::Sin(FirstPersonStride*2.f)*1.0f*Blend : 0.f;
+    const float BobY=bMoving ? FMath::Sin(FirstPersonStride)*1.1f*Blend : 0.f;
+    WeaponKick=FMath::FInterpTo(WeaponKick,0.f,Delta,11.f);
+    TargetFOV=FMath::FInterpTo(TargetFOV,Speed>550.f ? 98.f : 92.f,Delta,4.f);
+    FirstPersonCamera->SetFieldOfView(TargetFOV);
+    FirstPersonRifle->SetRelativeLocation(FVector(44.f-WeaponKick,18.f+BobY,-21.f+BobZ-WeaponKick*.22f));
+    FirstPersonPistol->SetRelativeLocation(FVector(40.f-WeaponKick,15.f+BobY,-18.f+BobZ-WeaponKick*.22f));
+    const FRotator Sway(-WeaponKick*.8f,0.f,BobY*.25f);
+    FirstPersonRifle->SetRelativeRotation(FRotator(0,-90.f,0)+Sway);
+    FirstPersonPistol->SetRelativeRotation(FRotator(0,-90.f,0)+Sway);
+}
+
 
 void AContactResponder::BeginSoloHuntWithPistol()
 {
@@ -329,8 +378,17 @@ void AContactResponder::BeginSoloHuntWithPistol()
     bPistol=true;
     Ammo=PistolAmmo;
     bTrigger=false;
+    bFirstPersonExperience=true;
+    if (ThirdPersonCamera) ThirdPersonCamera->SetActive(false);
+    if (FirstPersonCamera) FirstPersonCamera->SetActive(true);
+    // Only the camera-relative hands/weapon are visible in Solo Hunt.
+    GetMesh()->SetOwnerNoSee(true);
+    Gun->SetOwnerNoSee(true);
+    Sidearm->SetOwnerNoSee(true);
     Gun->SetVisibility(false,true);
     Sidearm->SetVisibility(true,true);
+    if (FirstPersonRifle) FirstPersonRifle->SetVisibility(false);
+    if (FirstPersonPistol) FirstPersonPistol->SetVisibility(true);
     UE_LOG(LogTemp,Display,TEXT("INTRO starter pistol equipped, rounds=%d"),Ammo);
 }
 
@@ -346,6 +404,11 @@ void AContactResponder::BeginRescueMode()
     bTrigger=false;
     Gun->SetVisibility(true,true);
     Sidearm->SetVisibility(false,true);
+    if (bFirstPersonExperience)
+    {
+        if (FirstPersonRifle) FirstPersonRifle->SetVisibility(true);
+        if (FirstPersonPistol) FirstPersonPistol->SetVisibility(false);
+    }
     UE_LOG(LogTemp,Warning,TEXT("RESCUE MODE armed: dog taken, rifle ready"));
 }
 
@@ -528,6 +591,11 @@ void AContactResponder::ServerEquip_Implementation(bool Pistol)
     NextShot=GetWorld()->GetTimeSeconds()+.18;
     Gun->SetVisibility(!bPistol,true);
     Sidearm->SetVisibility(bPistol,true);
+    if (bFirstPersonExperience)
+    {
+        if (FirstPersonRifle) FirstPersonRifle->SetVisibility(!bPistol);
+        if (FirstPersonPistol) FirstPersonPistol->SetVisibility(bPistol);
+    }
 }
 void AContactResponder::ServerReload_Implementation()
 {
@@ -649,6 +717,7 @@ void AContactResponder::Tick(float Delta)
 {
     Super::Tick(Delta);
     if (!Health || !Active(GetWorld())) return;
+    if (IsLocallyControlled()) UpdateFirstPerson(Delta);
     const bool Moving = GetVelocity().Size2D()>35;
     if (!IsTrooper() && HasAuthority() && !bBoss)
         GetCharacterMovement()->MaxWalkSpeed = (GetWorld()->GetTimeSeconds()<BrainControlledUntil) ? 150.f : 440.f;
@@ -772,6 +841,8 @@ void AContactResponder::Shoot(const FVector& Aim, bool Scatter)
     if (bReloading) return;
     if (Ammo<=0) { ServerReload(); return; }
     --Ammo;
+    if (!IsTrooper() && bFirstPersonExperience)
+        WeaponKick=FMath::Min(10.f,WeaponKick+(bPistol ? 4.1f : 2.0f));
     if (!IsTrooper()) UE_LOG(LogTemp,Display,TEXT("BATTLE player fired ammo=%d position=%s"),Ammo,*GetActorLocation().ToCompactString());
     const double Now=GetWorld()->GetTimeSeconds();
     NextShot=Now+(Scatter ? FMath::FRandRange(.7f,1.45) : (bPistol ? .30f : .13f));

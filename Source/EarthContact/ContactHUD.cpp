@@ -10,18 +10,59 @@ void AContactHUD::DrawHUD()
     auto* Player=Cast<AContactResponder>(GetOwningPawn());
     if (!State || !Player || !Canvas) return;
     const float W=Canvas->SizeX,H=Canvas->SizeY;
+    // Original in-universe shooter parody. No Call of Duty game files, art
+    // or copyrighted audio are used. This is a staged opening overlay.
+    if (State->bHunt && State->IntroStage<=1)
+    {
+        const double Now=GetWorld()->GetTimeSeconds();
+        const FLinearColor Black(.018f,.024f,.032f,1.f);
+        const FLinearColor Night(.08f,.12f,.14f,1.f);
+        const FLinearColor Neon(.75f,.94f,.59f,1.f);
+        DrawRect(Black,0,0,W,H);
+        DrawRect(Night,55,62,W-110,H-143);
+        DrawRect(FLinearColor(.15f,.20f,.20f,1.f),65,H*.58f,W-130,H*.23f);
+        const float CenterX=W*.5f+FMath::Sin(Now*1.6)*W*.06f;
+        const float CenterY=H*.47f+FMath::Cos(Now*2.3)*H*.025f;
+        // Graphic target silhouettes in the fake game's crosshairs.
+        for (int32 I=0;I<6;++I)
+        {
+            const float PX=120.f+(W-260.f)*I/5.f;
+            const float PY=H*.55f+18.f*FMath::Sin(float(Now*.8+I));
+            DrawRect(FLinearColor(.24f,.28f,.25f),PX,PY-42,26,58);
+            DrawRect(FLinearColor(.24f,.28f,.25f),PX+4,PY-62,18,21);
+        }
+        DrawLine(CenterX-18,CenterY,CenterX-6,CenterY,Neon,2.f);
+        DrawLine(CenterX+6,CenterY,CenterX+18,CenterY,Neon,2.f);
+        DrawLine(CenterX,CenterY-18,CenterX,CenterY-6,Neon,2.f);
+        DrawLine(CenterX,CenterY+6,CenterX,CenterY+18,Neon,2.f);
+        DrawText(TEXT("DUTY CALLS  /  DUST WARFARE"),Neon,82,76,nullptr,1.7f);
+        DrawText(TEXT("MISSION: HOLD THE LAST CHECKPOINT"),FLinearColor::White,84,117);
+        DrawText(TEXT("WAVE 03       SCORE  00950"),Neon,92,H-170);
+        DrawText(TEXT("PRIMARY: BLASTER  /  30"),FLinearColor::White,W-340,H-170);
+        DrawText(TEXT("EARTHCONTACT  /  HOME  /  11:47 PM"),
+            FLinearColor(.65f,.68f,.70f),55,H-56);
+        if (State->IntroStage==1)
+        {
+            DrawRect(FLinearColor(.015f,.018f,.023f,.92f),W*.17f,H*.34f,W*.66f,H*.25f);
+            const bool bBarkBeat=FMath::Fmod(float(Now*2.8),2.f)<1.f;
+            DrawText(bBarkBeat ? TEXT("WOOF! WOOF! WOOF!") : TEXT("YOUR DOG IS BARKING OUTSIDE!"),
+                FLinearColor(1.f,.68f,.34f),W*.21f,H*.40f,nullptr,1.55f);
+            DrawText(TEXT("WHAT THE HELL WAS THAT?"),
+                FLinearColor::White,W*.21f,H*.48f);
+        }
+        return;
+    }
     const FLinearColor Ink(.015f,.025f,.033f,.86f), Ally(.22f,.86f,.92f), Red(1,.32f,.20f), Gold(1,.78f,.33f);
     DrawRect(Ink,20,20,340,94);
     DrawRect(Gold,20,20,4,94);
-    DrawText(TEXT("ROSWELL    /    SIGNAL STATION"),Gold,37,29);
-    const TCHAR* IntroPrompt=State->IntroStage==0 ? TEXT("HOME  /  SOMETHING IS WRONG OUTSIDE") :
-        State->IntroStage==1 ? TEXT("A LIGHT FELL FROM THE SKY") :
-        State->IntroStage==2 ? TEXT("YOUR DOG IS RUNNING TOWARD THE CRASH") :
-        State->IntroStage==3 ? TEXT("THOSE ARE NOT PEOPLE  /  FOLLOW THE DOG") : nullptr;
+    DrawText(State->bHunt ? TEXT("EARTHCONTACT  /  DESERT ENCOUNTER") : TEXT("ROSWELL  /  SIGNAL STATION"),Gold,37,29);
+    const TCHAR* IntroPrompt=State->IntroStage==2 ? TEXT("SOMETHING IS FALLING FROM THE SKY") :
+        State->IntroStage==3 ? TEXT("THE SHIP HAS CRASHED  /  YOUR DOG IS RUNNING") :
+        State->IntroStage==4 ? TEXT("THOSE ARE NOT PEOPLE  /  FOLLOW THE DOG") : nullptr;
     DrawText(State->bHunt ? (IntroPrompt ? IntroPrompt :
-        (State->bBossSpawned ? TEXT("NORDIC ENTITY  /  EIGHT-FOOT BOSS") : TEXT("THE GREYS  /  SURVIVE THE ENCOUNTER"))) :
+        (State->bBossSpawned ? TEXT("MONSTER LEADER  /  SURVIVE") : TEXT("THE GREYS  /  SURVIVE THE ENCOUNTER"))) :
         TEXT("Hold the relay or eliminate all raiders"),FLinearColor::White,37,50,nullptr,1.15);
-    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->IntroStage<4 ? TEXT("PROLOGUE") : State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
+    DrawText(State->bHunt ? FString::Printf(TEXT("HOSTILES  %d     /     %s"),State->Raiders,State->IntroStage<5 ? TEXT("PROLOGUE") : State->bBossSpawned ? TEXT("BOSS PHASE") : TEXT("HUNT PHASE")) : FString::Printf(TEXT("UNIT  %02d       RAIDERS  %02d       RELAY  %d%%"),State->Allies,State->Raiders,FMath::RoundToInt(10*State->Uplink)),Ally,37,83);
     DrawRect(Ink,20,H-86,258,66);
     DrawText(FString::Printf(TEXT("HP  %03d"),Player->Health),Ally,36,H-78,nullptr,1.45);
     DrawText(Player->bReloading ? TEXT("RELOADING") : FString::Printf(TEXT("%s  %02d / %d"),Player->bPistol ? TEXT("PISTOL") : TEXT("RIFLE"),Player->Ammo,Player->bPistol ? 17 : 30),Gold,130,H-77);
